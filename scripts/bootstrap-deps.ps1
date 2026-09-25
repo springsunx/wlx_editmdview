@@ -6,16 +6,36 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $downloadRoot = Join-Path $repoRoot '.deps\downloads'
 $sourceRoot = Join-Path $repoRoot '.deps\src'
 
+function Invoke-DependencyDownload {
+    param(
+        [Parameter(Mandatory)] [string] $Uri,
+        [Parameter(Mandatory)] [string] $OutFile
+    )
+
+    for ($attempt = 1; $attempt -le 4; ++$attempt) {
+        try {
+            Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UserAgent 'EditMdView dependency bootstrap'
+            return
+        } catch {
+            if (Test-Path -LiteralPath $OutFile) { Remove-Item -LiteralPath $OutFile -Force }
+            if ($attempt -eq 4) { throw }
+            $delaySeconds = [Math]::Pow(2, $attempt)
+            Write-Warning "Download failed (attempt $attempt/4). Retrying in $delaySeconds seconds..."
+            Start-Sleep -Seconds $delaySeconds
+        }
+    }
+}
+
 $packages = @(
     @{
         Name = 'scintilla566.zip'
-        Uri = 'https://www.scintilla.org/scintilla566.zip'
+        Uri = 'https://downloads.sourceforge.net/project/scintilla/scintilla/5.6.6/scintilla566.zip'
         Sha256 = 'A0C0CDF1CF226DC6252020CE9A87A939A8B615E65269DB40AC9123B28FA20A9D'
         Destination = 'scintilla'
     },
     @{
         Name = 'lexilla553.zip'
-        Uri = 'https://www.scintilla.org/lexilla553.zip'
+        Uri = 'https://downloads.sourceforge.net/project/scintilla/lexilla/5.5.3/lexilla553.zip'
         Sha256 = '2092B1DD18355321717E3BDE25148E4C87E691723CA2B06A65E29A307C5462A6'
         Destination = 'lexilla'
     },
@@ -41,7 +61,7 @@ foreach ($package in $packages) {
 
     if (-not (Test-Path -LiteralPath $archivePath)) {
         Write-Host "Downloading $($package.Name)..."
-        Invoke-WebRequest -Uri $package.Uri -OutFile $archivePath
+        Invoke-DependencyDownload -Uri $package.Uri -OutFile $archivePath
     }
 
     $actualHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
