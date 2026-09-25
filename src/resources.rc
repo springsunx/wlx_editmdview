@@ -1,0 +1,43 @@
+#include <windows.h>
+#include "resource.h"
+
+IDR_PREVIEW_SCRIPT RCDATA "assets\\preview.js"
+IDR_PREVIEW_STYLE RCDATA "assets\\preview.css"
+IDR_HIGHLIGHT_SCRIPT RCDATA "assets\\highlight.min.js"
+IDR_HIGHLIGHT_CMAKE_SCRIPT RCDATA "assets\\highlight-cmake.min.js"
+IDR_HIGHLIGHT_DOS_SCRIPT RCDATA "assets\\highlight-dos.min.js"
+IDR_HIGHLIGHT_LISP_SCRIPT RCDATA "assets\\highlight-lisp.min.js"
+IDR_HIGHLIGHT_POWERSHELL_SCRIPT RCDATA "assets\\highlight-powershell.min.js"
+IDR_HIGHLIGHT_PROPERTIES_SCRIPT RCDATA "assets\\highlight-properties.min.js"
+
+ID_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,5,9,0
+ PRODUCTVERSION 0,5,9,0
+ FILEFLAGSMASK 0x3fL
+#ifdef _DEBUG
+ FILEFLAGS VS_FF_DEBUG
+#else
+ FILEFLAGS 0x0L
+#endif
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_DLL
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "080404b0"
+        BEGIN
+            VALUE "CompanyName", "EditMdView contributors"
+            VALUE "FileDescription", "Text editor and Markdown/HTML viewer for Total Commander"
+            VALUE "FileVersion", "0.5.9"
+            VALUE "InternalName", "EditMdView"
+            VALUE "OriginalFilename", "EditMdView.wlx64"
+            VALUE "ProductName", "EditMdView"
+            VALUE "ProductVersion", "0.5.9"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0804, 1200
+    END
+END

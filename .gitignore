@@ -1,0 +1,10 @@
+.deps/
+build/
+build-x86/
+dist/
+out/
+.vs/
+*.user
+*.suo
+*.VC.db
+EditMdView.history.ini

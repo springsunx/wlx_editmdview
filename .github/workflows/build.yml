@@ -1,0 +1,29 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test x86 and x64
+        shell: powershell
+        run: .\scripts\build.ps1 -Architecture All
+
+      - name: Create combined package
+        shell: powershell
+        run: .\scripts\package.ps1 -Configuration Release
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: EditMdView-v0.5.9
+          path: dist/EditMdView-v0.5.9.zip
+          if-no-files-found: error
