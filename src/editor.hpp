@@ -28,6 +28,7 @@ struct EditorViewState {
     std::intptr_t anchor = 0;
     std::intptr_t caret = 0;
     int firstVisibleLine = 0;
+    std::intptr_t topVisiblePosition = -1;
     int horizontalOffset = 0;
 };
 
@@ -121,7 +122,7 @@ private:
     int unwrappedHorizontalOffset_ = 0;
     bool dark_ = false;
     SyntaxLanguage language_ = SyntaxLanguage::Plain;
-    std::wstring languageName_ = L"纯文本";
+    std::wstring languageName_ = L"Plain text";
     SciteProperties properties_;
 };
 

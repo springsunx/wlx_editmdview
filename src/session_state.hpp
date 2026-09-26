@@ -11,6 +11,7 @@ struct PersistedViewState {
     std::intptr_t anchor = 0;
     std::intptr_t caret = 0;
     int firstVisibleLine = 0;
+    std::intptr_t topVisiblePosition = -1;
     int horizontalOffset = 0;
     double previewScrollFraction = 0.0;
     double splitRatio = 0.5;

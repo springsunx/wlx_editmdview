@@ -28,7 +28,8 @@ public:
     void focus() const;
     void set_find_shortcuts(HWND commandTarget, UINT focusFindMessage, UINT findNextMessage,
         UINT findResultMessage = 0, UINT toggleModeMessage = 0,
-        UINT reloadConfigurationMessage = 0);
+        UINT reloadConfigurationMessage = 0, UINT saveMessage = 0,
+        UINT saveAsMessage = 0);
     void set_source_navigation(HWND commandTarget, UINT locateSourceMessage);
     void set_source_navigation_enabled(bool enabled);
     bool ready() const noexcept;

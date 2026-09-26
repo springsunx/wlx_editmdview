@@ -1,6 +1,6 @@
 # SciTE properties compatibility
 
-EditMdView 0.5.9 reads SciTE's editor-related `.properties` settings. Configuration is optional: the plugin uses built-in defaults when no property files are present.
+EditMdView 0.5.10 reads SciTE's editor-related `.properties` settings. Configuration is optional: the plugin uses built-in defaults when no property files are present.
 
 The release ZIP ships `SciTEGlobal.properties`, `SciTEUser.properties`, and curated
 `conf.properties`, `cpp.properties`, `html.properties`, and `lisp.properties` language files.
@@ -49,9 +49,16 @@ and abbreviations files.
 - Rendering: `technology`, `font.quality`, `font.locale`, `buffered.draw`, `phases.draw`
 - Lexer selection and data: `lexer.*.ext`, `keywords` through `keywords9`, `word.characters`,
   `asp.default.language`, and properties exposed by the active Lexilla lexer
-- Styles: `font.base`, `style.*.N`, `style.<lexer>.N`; attributes `fore`, `back`, `font`,
+- Styles: `font.base`, `font.comment`, `style.*.N`, `style.<lexer>.N`; attributes `fore`, `back`, `font`,
   fractional `size`, `weight`, `stretch`, `case`, `bold`, `italics`, `underlined`,
   `eolfilled`, `visible`, `changeable`, `invisiblerepresentation`, and their negative forms
+
+`font.comment` is the fallback typography for all comment styles recognized by the active
+bundled lexer. Style application order is `font.base` / default style, then `font.comment`, then
+`style.*.N`, and finally `style.<lexer>.N`, so a language-specific style can intentionally override
+the global comment font. Property files follow the loading order above: in particular, a
+`font.comment` in the final portable `SciTEUser.properties` overrides the same property in
+`SciTEGlobal.properties`.
 - Whitespace and layout: `view.whitespace`, `view.indentation.whitespace`,
   `view.indentation.guides`, `view.indentation.examine`, `highlight.indentation.guides`,
   `view.eol`, `control.char.symbol`, `whitespace.fore/back/size`, `blank.margin.left/right`,

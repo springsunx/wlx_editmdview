@@ -69,6 +69,7 @@ private:
     bool initialize(HWND window);
     LRESULT handle_message(UINT message, WPARAM wParam, LPARAM lParam);
     void layout();
+    void restore_pending_editor_view_state();
     void set_mode(ViewMode mode);
     void refresh_preview(std::optional<double> initialScrollFraction = std::nullopt);
     void schedule_preview_sync(bool useCaretLine);
@@ -81,11 +82,14 @@ private:
     void set_eol_mode(int scintillaEolMode);
     void set_language(SyntaxLanguage language);
     void save();
+    void save_as();
     bool confirm_discard_or_save();
     void toggle_theme();
+    void show_language_menu(POINT screenPoint);
+    void apply_ui_language();
     bool prefill_find_from_selection();
     void perform_find(bool backwards = false, bool fromStart = false);
-    void show_editor_menu(POINT screenPoint);
+    void show_editor_menu(POINT screenPoint, bool contextMenu);
     void show_go_to_line();
     void show_replace_dialog();
     void perform_replace_action(int command);
@@ -157,6 +161,7 @@ private:
     int slashWheelRemainder_ = 0;
     bool slashTableMode_ = false;
     bool restoringDocumentState_ = false;
+    std::optional<EditorViewState> pendingEditorViewState_;
     bool discardingChanges_ = false;
     bool recoveryWriteFailed_ = false;
     std::string recoverySnapshotContent_;

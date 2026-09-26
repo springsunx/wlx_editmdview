@@ -1,5 +1,5 @@
 #include "editor.hpp"
-
+#include "i18n.hpp"
 #include <ILexer.h>
 #include <LexerModule.h>
 #include <SciLexer.h>
@@ -252,14 +252,14 @@ std::size_t position_after_save_cleanup(std::string_view original, std::size_t o
 
 bool Editor::create(HWND parent, HINSTANCE instance, bool dark, std::wstring& error) {
     if (!ensure_scintilla_registered(instance)) {
-        error = L"无法注册 Scintilla 窗口类。";
+        error = i18n::text(L"Unable to register the Scintilla window class.");
         return false;
     }
 
     window_ = CreateWindowExW(0, L"Scintilla", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_CLIPSIBLINGS,
         0, 0, 100, 100, parent, nullptr, instance, nullptr);
     if (!window_) {
-        error = L"无法创建 Scintilla 编辑器。";
+        error = i18n::text(L"Unable to create the Scintilla editor.");
         return false;
     }
 
@@ -634,8 +634,8 @@ bool Editor::insert_markdown_link() {
         const auto* bytes = reinterpret_cast<const char*>(send(SCI_GETRANGEPOINTER, start, end - start));
         if (bytes) selected.assign(bytes, static_cast<std::size_t>(end - start));
     }
-    const std::string label = selected.empty() ? "链接文字" : selected;
-    const std::string address = "链接地址";
+    const std::string label = selected.empty() ? i18n::text_utf8("link text") : selected;
+    const std::string address = i18n::text_utf8("URL");
     const std::string replacement = "[" + label + "](" + address + ")";
     send(SCI_BEGINUNDOACTION);
     send(SCI_SETTARGETSTART, start);
@@ -965,9 +965,9 @@ bool Editor::insert_markdown_command(std::string_view command, int tableRows, in
     else if (command == "v4") replacement = "> [!warning]\n> ";
     else if (command == "v5") replacement = "> [!caution]\n> ";
     else if (command == "link") {
-        replacement = "[链接文字](链接地址)";
+        replacement = "[" + i18n::text_utf8("link text") + "](" + i18n::text_utf8("URL") + ")";
         selectionOffset = 1;
-        selectionLength = std::string("链接文字").size();
+        selectionLength = i18n::text_utf8("link text").size();
     } else if (command == "table") {
         tableRows = std::clamp(tableRows, 2, 20);
         tableColumns = std::clamp(tableColumns, 1, 20);
@@ -984,11 +984,11 @@ bool Editor::insert_markdown_command(std::string_view command, int tableRows, in
             }
             replacement += eol;
         };
-        append_row("标题 ", true);
+        append_row(i18n::text_utf8("Heading") + " ", true);
         append_row("---", false);
         for (int row = 1; row < tableRows; ++row) append_row("", false);
         selectionOffset = 2;
-        selectionLength = std::string("标题 1").size();
+        selectionLength = (i18n::text_utf8("Heading") + " 1").size();
     } else {
         return false;
     }
@@ -1372,6 +1372,18 @@ EditorViewState Editor::view_state() const {
     state.anchor = send(SCI_GETANCHOR);
     state.caret = send(SCI_GETCURRENTPOS);
     state.firstVisibleLine = std::max(0, static_cast<int>(send(SCI_GETFIRSTVISIBLELINE)));
+    const auto topDocumentLine = std::max<LRESULT>(0,
+        send(SCI_DOCLINEFROMVISIBLE, static_cast<WPARAM>(state.firstVisibleLine)));
+    const auto topDocumentStart = std::max<LRESULT>(0,
+        send(SCI_POSITIONFROMLINE, static_cast<WPARAM>(topDocumentLine)));
+    const int lineHeight = std::max(1, static_cast<int>(send(
+        SCI_TEXTHEIGHT, static_cast<WPARAM>(topDocumentLine))));
+    const int documentX = static_cast<int>(send(
+        SCI_POINTXFROMPOSITION, 0, topDocumentStart));
+    const int textLeft = documentX + std::max(0, static_cast<int>(send(SCI_GETXOFFSET))) + 1;
+    const auto pointPosition = send(SCI_POSITIONFROMPOINTCLOSE,
+        static_cast<WPARAM>(std::max(0, textLeft)), lineHeight / 2);
+    state.topVisiblePosition = pointPosition >= 0 ? pointPosition : topDocumentStart;
     state.horizontalOffset = std::max(0, static_cast<int>(send(SCI_GETXOFFSET)));
     return state;
 }
@@ -1381,7 +1393,21 @@ void Editor::restore_view_state(const EditorViewState& state) const {
     const auto anchor = std::clamp<LRESULT>(state.anchor, 0, length);
     const auto caret = std::clamp<LRESULT>(state.caret, 0, length);
     send(SCI_SETSEL, static_cast<WPARAM>(anchor), caret);
-    send(SCI_SETFIRSTVISIBLELINE, static_cast<WPARAM>(std::max(0, state.firstVisibleLine)));
+    if (state.topVisiblePosition >= 0) {
+        const auto topPosition = std::clamp<LRESULT>(state.topVisiblePosition, 0, length);
+        const auto topDocumentLine = std::max<LRESULT>(0, send(
+            SCI_LINEFROMPOSITION, static_cast<WPARAM>(topPosition)));
+        const auto firstDisplayLine = std::max<LRESULT>(0, send(
+            SCI_VISIBLEFROMDOCLINE, static_cast<WPARAM>(topDocumentLine)));
+        send(SCI_SETFIRSTVISIBLELINE, static_cast<WPARAM>(firstDisplayLine));
+        const int lineHeight = std::max(1, static_cast<int>(send(
+            SCI_TEXTHEIGHT, static_cast<WPARAM>(topDocumentLine))));
+        const int positionY = static_cast<int>(send(
+            SCI_POINTYFROMPOSITION, 0, topPosition));
+        if (positionY > 0) send(SCI_LINESCROLL, 0, positionY / lineHeight);
+    } else {
+        send(SCI_SETFIRSTVISIBLELINE, static_cast<WPARAM>(std::max(0, state.firstVisibleLine)));
+    }
     send(SCI_SETXOFFSET, static_cast<WPARAM>(std::max(0, state.horizontalOffset)));
 }
 
@@ -1457,9 +1483,9 @@ void Editor::configure_language(SyntaxLanguage language, bool useFileSpecificKey
     case SyntaxLanguage::Yaml:
         module = &lmYAML; languageName_ = L"YAML"; break;
     case SyntaxLanguage::Properties:
-        module = &lmProps; languageName_ = L"配置文件"; break;
+        module = &lmProps; languageName_ = i18n::text(L"Properties"); break;
     case SyntaxLanguage::Conf:
-        module = &lmConf; languageName_ = L"Apache 配置"; break;
+        module = &lmConf; languageName_ = i18n::text(L"Apache config"); break;
     case SyntaxLanguage::CMake:
         module = &lmCmake; languageName_ = L"CMake";
         keywords = "add_executable add_library add_subdirectory cmake_minimum_required find_package include install message option project set target_compile_definitions target_compile_features target_compile_options target_include_directories target_link_libraries if elseif else endif foreach endforeach function endfunction macro endmacro while endwhile";
@@ -1488,7 +1514,7 @@ void Editor::configure_language(SyntaxLanguage language, bool useFileSpecificKey
         break;
     case SyntaxLanguage::Plain:
     default:
-        languageName_ = L"纯文本"; break;
+        languageName_ = i18n::text(L"Plain text"); break;
     }
 
     std::array<std::string, 9> keywordSets;
@@ -1699,11 +1725,17 @@ void Editor::apply_styles(bool dark) {
     auto set_fore = [&](std::initializer_list<int> styles, COLORREF value) {
         for (int style : styles) send(SCI_STYLESETFORE, style, value);
     };
+    const auto commentFont = properties_.value("font.comment");
+    auto apply_comment_font = [&](std::initializer_list<int> styles) {
+        if (!commentFont) return;
+        for (int style : styles) apply_definition(style, *commentFont);
+    };
     auto set_comments = [&](std::initializer_list<int> styles) {
         for (int style : styles) {
             send(SCI_STYLESETFORE, style, muted);
             send(SCI_STYLESETITALIC, style, TRUE);
         }
+        apply_comment_font(styles);
     };
     auto set_keywords = [&](std::initializer_list<int> styles) {
         for (int style : styles) {
@@ -1745,6 +1777,8 @@ void Editor::apply_styles(bool dark) {
     case SyntaxLanguage::JavaScript:
         set_comments({SCE_C_COMMENT, SCE_C_COMMENTLINE, SCE_C_COMMENTDOC, SCE_C_COMMENTLINEDOC,
             SCE_C_PREPROCESSORCOMMENT, SCE_C_PREPROCESSORCOMMENTDOC});
+        apply_comment_font({SCE_C_COMMENTDOCKEYWORD, SCE_C_COMMENTDOCKEYWORDERROR,
+            SCE_C_TASKMARKER});
         set_keywords({SCE_C_WORD, SCE_C_WORD2, SCE_C_GLOBALCLASS});
         set_fore({SCE_C_STRING, SCE_C_CHARACTER, SCE_C_VERBATIM, SCE_C_STRINGRAW,
             SCE_C_TRIPLEVERBATIM, SCE_C_HASHQUOTEDSTRING, SCE_C_REGEX}, green);
@@ -1768,6 +1802,12 @@ void Editor::apply_styles(bool dark) {
     case SyntaxLanguage::Html:
     case SyntaxLanguage::Xml:
         set_comments({SCE_H_COMMENT, SCE_H_XCCOMMENT, SCE_H_SGML_COMMENT});
+        apply_comment_font({SCE_H_SGML_1ST_PARAM_COMMENT,
+            SCE_HJ_COMMENT, SCE_HJ_COMMENTLINE, SCE_HJ_COMMENTDOC,
+            SCE_HJA_COMMENT, SCE_HJA_COMMENTLINE, SCE_HJA_COMMENTDOC,
+            SCE_HB_COMMENTLINE, SCE_HBA_COMMENTLINE,
+            SCE_HP_COMMENTLINE, SCE_HPA_COMMENTLINE,
+            SCE_HPHP_COMMENT, SCE_HPHP_COMMENTLINE});
         set_keywords({SCE_H_TAG, SCE_H_SCRIPT, SCE_H_SGML_COMMAND});
         set_fore({SCE_H_ATTRIBUTE, SCE_H_ENTITY}, purple);
         set_fore({SCE_H_DOUBLESTRING, SCE_H_SINGLESTRING, SCE_H_VALUE, SCE_H_CDATA}, green);
@@ -1788,6 +1828,8 @@ void Editor::apply_styles(bool dark) {
         break;
     case SyntaxLanguage::Sql:
         set_comments({SCE_SQL_COMMENT, SCE_SQL_COMMENTLINE, SCE_SQL_COMMENTDOC, SCE_SQL_COMMENTLINEDOC});
+        apply_comment_font({SCE_SQL_SQLPLUS_COMMENT, SCE_SQL_COMMENTDOCKEYWORD,
+            SCE_SQL_COMMENTDOCKEYWORDERROR});
         set_keywords({SCE_SQL_WORD, SCE_SQL_WORD2});
         set_fore({SCE_SQL_STRING, SCE_SQL_CHARACTER, SCE_SQL_QUOTEDIDENTIFIER}, green);
         set_fore({SCE_SQL_NUMBER}, purple);
@@ -1830,6 +1872,7 @@ void Editor::apply_styles(bool dark) {
         break;
     case SyntaxLanguage::PowerShell:
         set_comments({SCE_POWERSHELL_COMMENT, SCE_POWERSHELL_COMMENTSTREAM});
+        apply_comment_font({SCE_POWERSHELL_COMMENTDOCKEYWORD});
         set_keywords({SCE_POWERSHELL_KEYWORD, SCE_POWERSHELL_CMDLET, SCE_POWERSHELL_ALIAS});
         set_fore({SCE_POWERSHELL_STRING, SCE_POWERSHELL_CHARACTER, SCE_POWERSHELL_HERE_STRING,
             SCE_POWERSHELL_HERE_CHARACTER}, green);

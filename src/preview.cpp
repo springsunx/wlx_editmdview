@@ -1,4 +1,5 @@
 #include "preview.hpp"
+#include "i18n.hpp"
 #include "resource.h"
 
 #include <unknwn.h>
@@ -50,6 +51,8 @@ struct Preview::State : std::enable_shared_from_this<Preview::State> {
     UINT findResultMessage = 0;
     UINT toggleModeMessage = 0;
     UINT reloadConfigurationMessage = 0;
+    UINT saveMessage = 0;
+    UINT saveAsMessage = 0;
     UINT locateSourceMessage = 0;
     bool sourceNavigationEnabled = false;
     std::wstring previewScript;
@@ -309,7 +312,7 @@ bool Preview::create(HWND parent, HINSTANCE instance, std::wstring& error) {
             IDR_HIGHLIGHT_PROPERTIES_SCRIPT}) {
         std::wstring languageScript = load_utf8_resource(instance, resourceId);
         if (languageScript.empty()) {
-            error = L"无法读取内嵌的预览资源。";
+            error = i18n::text(L"Unable to read the embedded preview resource.");
             state_.reset();
             return false;
         }
@@ -317,15 +320,15 @@ bool Preview::create(HWND parent, HINSTANCE instance, std::wstring& error) {
         state_->highlightScript += std::move(languageScript);
     }
     if (state_->previewScript.empty() || state_->previewStyle.empty() || state_->highlightScript.empty()) {
-        error = L"无法读取内嵌的预览资源。";
+        error = i18n::text(L"Unable to read the embedded preview resource.");
         state_.reset();
         return false;
     }
-    state_->host = CreateWindowExW(0, L"STATIC", L"正在启动渲染预览…",
+    state_->host = CreateWindowExW(0, L"STATIC", i18n::text(L"Starting rendered preview…").c_str(),
         WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS | SS_CENTER,
         0, 0, 100, 100, parent, nullptr, instance, nullptr);
     if (!state_->host) {
-        error = L"无法创建预览区域。";
+        error = i18n::text(L"Unable to create the preview area.");
         state_.reset();
         return false;
     }
@@ -338,7 +341,7 @@ bool Preview::create(HWND parent, HINSTANCE instance, std::wstring& error) {
             [state](HRESULT result, ICoreWebView2Environment* environment) -> HRESULT {
                 if (!state->alive) return S_OK;
                 if (FAILED(result) || !environment) {
-                    SetWindowTextW(state->host, L"未检测到 WebView2 Runtime，当前仅可使用编辑模式。\r\n可安装 Microsoft Edge WebView2 Runtime 后重试。");
+                    SetWindowTextW(state->host, i18n::text(L"WebView2 Runtime was not detected; only edit mode is available.\r\nInstall Microsoft Edge WebView2 Runtime and try again.").c_str());
                     return S_OK;
                 }
                 state->environment = environment;
@@ -347,7 +350,7 @@ bool Preview::create(HWND parent, HINSTANCE instance, std::wstring& error) {
                         [state](HRESULT controllerResult, ICoreWebView2Controller* controller) -> HRESULT {
                             if (!state->alive) return S_OK;
                             if (FAILED(controllerResult) || !controller) {
-                                SetWindowTextW(state->host, L"渲染预览初始化失败，当前仅可使用编辑模式。");
+                                SetWindowTextW(state->host, i18n::text(L"Preview initialization failed; only edit mode is available.").c_str());
                                 return S_OK;
                             }
                             state->controller = controller;
@@ -492,7 +495,13 @@ bool Preview::create(HWND parent, HINSTANCE instance, std::wstring& error) {
                                                 kind != COREWEBVIEW2_KEY_EVENT_KIND_SYSTEM_KEY_DOWN)) return S_OK;
                                         const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
                                         const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-                                        if (key == 'R' && control && shift &&
+                                        if (key == 'S' && control && shift && current->saveAsMessage != 0) {
+                                            PostMessageW(current->commandTarget, current->saveAsMessage, 0, 0);
+                                            args->put_Handled(TRUE);
+                                        } else if (key == 'S' && control && current->saveMessage != 0) {
+                                            PostMessageW(current->commandTarget, current->saveMessage, 0, 0);
+                                            args->put_Handled(TRUE);
+                                        } else if (key == 'R' && control && shift &&
                                             current->reloadConfigurationMessage != 0) {
                                             PostMessageW(current->commandTarget,
                                                 current->reloadConfigurationMessage, 0, 0);
@@ -520,8 +529,8 @@ bool Preview::create(HWND parent, HINSTANCE instance, std::wstring& error) {
             }).Get());
 
     if (FAILED(startResult)) {
-        error = L"无法启动 WebView2 预览。";
-        SetWindowTextW(state_->host, L"无法启动 WebView2，当前仅可使用编辑模式。");
+        error = i18n::text(L"Unable to start the WebView2 preview.");
+        SetWindowTextW(state_->host, i18n::text(L"Unable to start WebView2; only edit mode is available.").c_str());
     }
     return true;
 }
@@ -604,7 +613,8 @@ void Preview::focus() const {
 }
 
 void Preview::set_find_shortcuts(HWND commandTarget, UINT focusFindMessage, UINT findNextMessage,
-    UINT findResultMessage, UINT toggleModeMessage, UINT reloadConfigurationMessage) {
+    UINT findResultMessage, UINT toggleModeMessage, UINT reloadConfigurationMessage,
+    UINT saveMessage, UINT saveAsMessage) {
     if (!state_) return;
     state_->commandTarget = commandTarget;
     state_->focusFindMessage = focusFindMessage;
@@ -612,6 +622,8 @@ void Preview::set_find_shortcuts(HWND commandTarget, UINT focusFindMessage, UINT
     state_->findResultMessage = findResultMessage;
     state_->toggleModeMessage = toggleModeMessage;
     state_->reloadConfigurationMessage = reloadConfigurationMessage;
+    state_->saveMessage = saveMessage;
+    state_->saveAsMessage = saveAsMessage;
 }
 
 void Preview::set_source_navigation(HWND commandTarget, UINT locateSourceMessage) {

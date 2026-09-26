@@ -159,7 +159,9 @@ BOOL CALLBACK accept_recovery_dialog_proc(HWND window, LPARAM value) {
     wchar_t title[128]{};
     GetClassNameW(window, className, static_cast<int>(std::size(className)));
     GetWindowTextW(window, title, static_cast<int>(std::size(title)));
-    if (wcscmp(className, L"#32770") != 0 || wcscmp(title, L"恢复未保存内容") != 0) return TRUE;
+    if (wcscmp(className, L"#32770") != 0 ||
+        (wcscmp(title, L"恢复未保存内容") != 0 &&
+         wcscmp(title, L"Recover Unsaved Content") != 0)) return TRUE;
     const HWND yes = GetDlgItem(window, IDYES);
     if (!yes) return TRUE;
     PostMessageW(window, WM_COMMAND, MAKEWPARAM(IDYES, BN_CLICKED), reinterpret_cast<LPARAM>(yes));
@@ -201,15 +203,26 @@ bool default_mode_is_correct(HWND pluginWindow, const std::filesystem::path& pat
         constexpr UINT getWrapMode = 2269;
         constexpr UINT styleGetFore = 2481;
         constexpr UINT styleGetSize = 2485;
+        constexpr UINT styleGetFont = 2486;
         constexpr UINT getMarginWidth = 2243;
         constexpr UINT getIndentationGuides = 2133;
         constexpr WPARAM styleDefault = 32;
+        char lineCommentFont[256]{};
+        char blockCommentFont[256]{};
+        SendMessageA(editor, styleGetFont, SCE_P_COMMENTLINE,
+            reinterpret_cast<LPARAM>(lineCommentFont));
+        SendMessageA(editor, styleGetFont, SCE_P_COMMENTBLOCK,
+            reinterpret_cast<LPARAM>(blockCommentFont));
         if (SendMessageW(editor, getTabWidth, 0, 0) != 3 ||
             SendMessageW(editor, getIndent, 0, 0) != 3 ||
             SendMessageW(editor, getUseTabs, 0, 0) != 0 ||
             SendMessageW(editor, getWrapMode, 0, 0) != 0 ||
             SendMessageW(editor, styleGetFore, styleDefault, 0) != RGB(0x12, 0x34, 0x56) ||
             SendMessageW(editor, styleGetSize, styleDefault, 0) != 13 ||
+            strcmp(lineCommentFont, "Arial") != 0 ||
+            SendMessageW(editor, styleGetSize, SCE_P_COMMENTLINE, 0) != 19 ||
+            strcmp(blockCommentFont, "Courier New") != 0 ||
+            SendMessageW(editor, styleGetSize, SCE_P_COMMENTBLOCK, 0) != 17 ||
             SendMessageW(editor, getMarginWidth, 2, 0) <= 0 ||
             SendMessageW(editor, getIndentationGuides, 0, 0) == 0) return false;
     }
@@ -278,10 +291,20 @@ bool default_mode_is_correct(HWND pluginWindow, const std::filesystem::path& pat
     char lispPalette[8]{};
     if (GetEnvironmentVariableA("EDITMDVIEW_EXPECT_LISP_PALETTE", lispPalette,
             static_cast<DWORD>(std::size(lispPalette))) > 0) {
+        char lineCommentFont[256]{};
+        char blockCommentFont[256]{};
+        SendMessageA(editor, SCI_STYLEGETFONT, SCE_LISP_COMMENT,
+            reinterpret_cast<LPARAM>(lineCommentFont));
+        SendMessageA(editor, SCI_STYLEGETFONT, SCE_LISP_MULTI_COMMENT,
+            reinterpret_cast<LPARAM>(blockCommentFont));
         if (SendMessageW(editor, SCI_STYLEGETFORE, SCE_LISP_NUMBER, 0) != RGB(0, 0, 0) ||
             SendMessageW(editor, SCI_STYLEGETFORE, SCE_LISP_KEYWORD, 0) != RGB(0xFF, 0, 0) ||
             SendMessageW(editor, SCI_STYLEGETFORE, SCE_LISP_STRING, 0) != RGB(0, 0x80, 0) ||
-            SendMessageW(editor, SCI_STYLEGETFORE, SCE_LISP_OPERATOR, 0) != RGB(0, 0, 0xFF)) return false;
+            SendMessageW(editor, SCI_STYLEGETFORE, SCE_LISP_OPERATOR, 0) != RGB(0, 0, 0xFF) ||
+            strcmp(lineCommentFont, "Consolas") != 0 ||
+            strcmp(blockCommentFont, "Consolas") != 0 ||
+            SendMessageW(editor, SCI_STYLEGETSIZE, SCE_LISP_COMMENT, 0) != 12 ||
+            SendMessageW(editor, SCI_STYLEGETSIZE, SCE_LISP_MULTI_COMMENT, 0) != 12) return false;
     }
     return true;
 }
@@ -416,7 +439,11 @@ bool editor_commands_work(HWND pluginWindow, const std::filesystem::path& path) 
     wchar_t eolPanel[128]{};
     SendMessageW(status, SB_GETTEXTW, 1, reinterpret_cast<LPARAM>(languagePanel));
     SendMessageW(status, SB_GETTEXTW, 3, reinterpret_cast<LPARAM>(eolPanel));
-    if (wcsstr(languagePanel, L"语言:") == nullptr || wcsstr(eolPanel, L"换行符:") == nullptr) return false;
+    const bool languageLabel = wcsstr(languagePanel, L"语言:") != nullptr ||
+        wcsstr(languagePanel, L"Language:") != nullptr;
+    const bool eolLabel = wcsstr(eolPanel, L"换行符:") != nullptr ||
+        wcsstr(eolPanel, L"EOL:") != nullptr;
+    if (!languageLabel || !eolLabel) return false;
 
     const LRESULT originalLength = SendMessageW(editor, SCI_GETLENGTH, 0, 0);
     std::string originalText(static_cast<std::size_t>(originalLength) + 1, '\0');
@@ -475,6 +502,9 @@ bool editor_commands_work(HWND pluginWindow, const std::filesystem::path& path) 
         SendMessageW(editor, SCI_GETMODIFY, 0, 0) != 0;
     SendMessageW(editor, SCI_UNDO, 0, 0);
     SendMessageW(pluginWindow, setEol, originalEol, 0);
+    // Keep the EOL test isolated: conversion undo behavior may retain a dirty
+    // save-point relation even when the original text and EOL mode are restored.
+    SendMessageW(editor, SCI_SETSAVEPOINT, 0, 0);
 
     SendMessageW(pluginWindow, setLanguage, 1, 0); // Markdown
     char switchedLexer[64]{};
@@ -725,7 +755,8 @@ int markdown_editing_failure(HWND pluginWindow, const std::filesystem::path& pat
     SendMessageW(editor, SCI_GOTOPOS, 6, 0);
     SendMessageW(pluginWindow, WM_APP + 14, 8, MAKELPARAM(3, 3));
     const std::string table = editor_text();
-    verify(table.find("| 标题 1 | 标题 2 | 标题 3 |") == 0 &&
+    verify((table.find("| 标题 1 | 标题 2 | 标题 3 |") == 0 ||
+            table.find("| Heading 1 | Heading 2 | Heading 3 |") == 0) &&
         table.find("| --- | --- | --- |") != std::string::npos, 11);
 
     const std::string eol = SendMessageW(editor, SCI_GETEOLMODE, 0, 0) == SC_EOL_CRLF
@@ -912,6 +943,21 @@ bool external_reload_works(HWND pluginWindow, const std::filesystem::path& path)
         SendMessageW(editor, SCI_GETMODIFY, 0, 0) == 0;
 }
 
+LRESULT editor_top_visible_position(HWND editor) {
+    const LRESULT firstVisible = SendMessageW(editor, SCI_GETFIRSTVISIBLELINE, 0, 0);
+    const LRESULT documentLine = SendMessageW(editor, SCI_DOCLINEFROMVISIBLE, firstVisible, 0);
+    const LRESULT documentStart = SendMessageW(editor, SCI_POSITIONFROMLINE, documentLine, 0);
+    const int lineHeight = std::max(1, static_cast<int>(
+        SendMessageW(editor, SCI_TEXTHEIGHT, documentLine, 0)));
+    const int documentX = static_cast<int>(
+        SendMessageW(editor, SCI_POINTXFROMPOSITION, 0, documentStart));
+    const int textLeft = documentX + std::max(0, static_cast<int>(
+        SendMessageW(editor, SCI_GETXOFFSET, 0, 0))) + 1;
+    const LRESULT position = SendMessageW(editor, SCI_POSITIONFROMPOINTCLOSE,
+        static_cast<WPARAM>(std::max(0, textLeft)), lineHeight / 2);
+    return position >= 0 ? position : documentStart;
+}
+
 bool background_preview_finishes(HWND pluginWindow) {
     const HWND status = FindWindowExW(pluginWindow, nullptr, L"msctls_statusbar32", nullptr);
     if (!status) return false;
@@ -919,7 +965,8 @@ bool background_preview_finishes(HWND pluginWindow) {
     while (GetTickCount64() < deadline) {
         wchar_t state[512]{};
         SendMessageW(status, SB_GETTEXTW, 4, reinterpret_cast<LPARAM>(state));
-        if (wcsstr(state, L"正在后台生成预览") == nullptr) return true;
+        if (wcsstr(state, L"正在后台生成预览") == nullptr &&
+            wcsstr(state, L"Rendering preview") == nullptr) return true;
         pump_messages(25);
     }
     return false;
@@ -968,6 +1015,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         L"EDITMDVIEW_EXPECT_RECOVERY_SNAPSHOT", nullptr, 0) > 0;
     const bool configurationReloadTest = GetEnvironmentVariableW(
         L"EDITMDVIEW_EXPECT_CONFIG_RELOAD", nullptr, 0) > 0;
+    const bool englishUiTest = GetEnvironmentVariableW(
+        L"EDITMDVIEW_EXPECT_ENGLISH_UI", nullptr, 0) > 0;
     if (persistentStateTest || recoverySnapshotTest || configurationReloadTest) {
         std::error_code cleanupError;
         std::filesystem::remove_all(runtimeDataDirectory, cleanupError);
@@ -985,6 +1034,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         output.close();
         SetEnvironmentVariableW(L"SciTE_HOME", configurationDirectory.c_str());
         SetEnvironmentVariableW(L"SciTE_USERHOME", configurationDirectory.c_str());
+    }
+    if (persistentStateTest) {
+        std::ofstream stream(documentPath, std::ios::binary | std::ios::trunc);
+        if (!stream) return 41;
+        for (int index = 0; index < 240; ++index) {
+            stream << "Line " << index << ' ' <<
+                std::string(520, static_cast<char>('a' + index % 26)) << '\n';
+        }
     }
     if (arguments) LocalFree(arguments);
 
@@ -1064,6 +1121,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         if (SUCCEEDED(comResult)) CoUninitialize();
         return 6;
     }
+    if (englishUiTest) {
+        const HWND languageButton = find_control_by_id(g_pluginWindow, 1011);
+        wchar_t languageText[64]{};
+        wchar_t editText[64]{};
+        GetWindowTextW(languageButton, languageText, static_cast<int>(std::size(languageText)));
+        GetWindowTextW(find_control_by_id(g_pluginWindow, 1001), editText,
+            static_cast<int>(std::size(editText)));
+        RECT languageBounds{};
+        GetWindowRect(languageButton, &languageBounds);
+        const bool translated = wcscmp(languageText, L"Language") == 0 &&
+            wcscmp(editText, L"Edit") == 0;
+        const bool textFits = languageBounds.right - languageBounds.left >= 70;
+        g_closePlugin(g_pluginWindow);
+        g_pluginWindow = nullptr;
+        DestroyWindow(host);
+        FreeLibrary(g_plugin);
+        if (SUCCEEDED(comResult)) CoUninitialize();
+        return translated && textFits ? 0 : 43;
+    }
     if (configurationReloadTest) {
         const HWND editor = FindWindowExW(g_pluginWindow, nullptr, L"Scintilla", nullptr);
         const bool initial = editor && SendMessageW(editor, SCI_GETTABWIDTH, 0, 0) == 2;
@@ -1076,7 +1152,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         wchar_t state[256]{};
         const HWND status = FindWindowExW(g_pluginWindow, nullptr, STATUSCLASSNAMEW, nullptr);
         if (status) SendMessageW(status, SB_GETTEXTW, 4, reinterpret_cast<LPARAM>(state));
-        const bool announced = wcsstr(state, L"配置已自动重新加载") != nullptr;
+        const bool announced = wcsstr(state, L"配置已自动重新加载") != nullptr ||
+            wcsstr(state, L"Configuration reloaded automatically") != nullptr;
         g_closePlugin(g_pluginWindow);
         g_pluginWindow = nullptr;
         DestroyWindow(host);
@@ -1130,23 +1207,51 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         const HWND splitButton = find_control_by_id(g_pluginWindow, 1002);
         if (!editor || !splitButton) return 41;
         SendMessageW(splitButton, BM_CLICK, 0, 0);
-        const LRESULT length = SendMessageW(editor, SCI_GETLENGTH, 0, 0);
-        const LRESULT expectedCaret = std::min<LRESULT>(length, 37);
-        SendMessageW(editor, SCI_SETSEL, expectedCaret, expectedCaret);
+        if (SendMessageW(editor, SCI_GETWRAPMODE, 0, 0) == SC_WRAP_NONE) {
+            SendMessageW(g_pluginWindow, WM_APP + 8, 0, 0);
+        }
+        const LRESULT expectedCaret = SendMessageW(editor, SCI_POSITIONFROMLINE, 150, 0) + 35;
+        const LRESULT expectedAnchor = expectedCaret - 7;
+        SendMessageW(editor, SCI_SETSEL, expectedAnchor, expectedCaret);
+        const LRESULT topDisplayLine = SendMessageW(editor, SCI_VISIBLEFROMDOCLINE, 120, 0) + 2;
+        SendMessageW(editor, SCI_SETFIRSTVISIBLELINE, topDisplayLine, 0);
+        const LRESULT expectedTopPosition = editor_top_visible_position(editor);
+        const LRESULT expectedTopDocumentLine = SendMessageW(
+            editor, SCI_LINEFROMPOSITION, expectedTopPosition, 0);
         g_closePlugin(g_pluginWindow);
         g_pluginWindow = nullptr;
         mutablePath = documentPath.wstring();
         g_pluginWindow = loadPlugin(host, mutablePath.data(), 0);
-        pump_messages(100);
+        pump_messages(150);
         const HWND reopenedEditor = g_pluginWindow
             ? FindWindowExW(g_pluginWindow, nullptr, L"Scintilla", nullptr) : nullptr;
         const HWND divider = g_pluginWindow ? find_control_by_id(g_pluginWindow, 1010) : nullptr;
+        const LRESULT restoredTopPosition = reopenedEditor
+            ? editor_top_visible_position(reopenedEditor) : -1;
+        const LRESULT restoredTopDocumentLine = reopenedEditor
+            ? SendMessageW(reopenedEditor, SCI_LINEFROMPOSITION, restoredTopPosition, 0) : -1;
         const bool restored = reopenedEditor && divider &&
             (GetWindowLongPtrW(reopenedEditor, GWL_STYLE) & WS_VISIBLE) != 0 &&
             (GetWindowLongPtrW(divider, GWL_STYLE) & WS_VISIBLE) != 0 &&
-            SendMessageW(reopenedEditor, SCI_GETCURRENTPOS, 0, 0) == expectedCaret;
+            SendMessageW(reopenedEditor, SCI_GETANCHOR, 0, 0) == expectedAnchor &&
+            SendMessageW(reopenedEditor, SCI_GETCURRENTPOS, 0, 0) == expectedCaret &&
+            restoredTopDocumentLine == expectedTopDocumentLine &&
+            restoredTopPosition == expectedTopPosition;
+        if (!restored) {
+            std::fprintf(stderr,
+                "persistent view check: anchor=%lld/%lld caret=%lld/%lld top=%lld/%lld line=%lld/%lld\n",
+                static_cast<long long>(reopenedEditor ? SendMessageW(reopenedEditor, SCI_GETANCHOR, 0, 0) : -1),
+                static_cast<long long>(expectedAnchor),
+                static_cast<long long>(reopenedEditor ? SendMessageW(reopenedEditor, SCI_GETCURRENTPOS, 0, 0) : -1),
+                static_cast<long long>(expectedCaret),
+                static_cast<long long>(restoredTopPosition), static_cast<long long>(expectedTopPosition),
+                static_cast<long long>(restoredTopDocumentLine),
+                static_cast<long long>(expectedTopDocumentLine));
+        }
         if (g_pluginWindow) g_closePlugin(g_pluginWindow);
         g_pluginWindow = nullptr;
+        std::error_code removeError;
+        std::filesystem::remove(documentPath, removeError);
         DestroyWindow(host);
         FreeLibrary(g_plugin);
         if (SUCCEEDED(comResult)) CoUninitialize();

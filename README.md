@@ -5,7 +5,7 @@ Scintilla text editor with live Markdown and HTML preview. It is designed as a c
 offline-first plugin: the editor, lexers, Markdown renderer, preview assets, and syntax
 highlighter are compiled into the WLX binaries.
 
-Version 0.5.9 remembers editing and preview positions both while paging and across Total
+Version 0.5.10 remembers editing and preview positions both while paging and across Total
 Commander restarts, restores the correct view mode without intermediate repaint jumps, and
 keeps an automatic recovery snapshot for unsaved edits. SciTE property files can be reloaded
 without reopening Lister, and Markdown editing includes list continuation, paired punctuation,
@@ -61,6 +61,7 @@ selection formatting, a slash-command palette, and smart URL paste.
 | `EditMdViewSave.exe` | Elevated save helper, used only after an access-denied save |
 | `pluginst.inf` | Total Commander automatic installer metadata |
 | `SciTE*.properties`, `*.properties` | Tested optional editor configuration |
+| `language.ini`, `lang\*.lng` | UI language selection and UTF-8 translation catalogs |
 | `SHORTCUTS.txt` | Complete Chinese keyboard reference |
 
 The plugin uses `EditMdView.wlx64` (64-bit) or `EditMdView.wlx` (32-bit). Keep the bundled `EditMdViewSave.exe` beside the WLX files: it is launched with a UAC prompt only when Windows denies an ordinary save to a protected directory. Microsoft Edge WebView2 Runtime must be installed for rendered preview; editing remains available when the runtime is missing.
@@ -70,6 +71,11 @@ configuration files while removing SciTE-only build, run, window, menu, output, 
 session, Lua, API, and call-tip settings. Standalone `.wlx64` and `.wlx` files remain available for users who
 prefer built-in defaults.
 
+## Interface language
+
+Use the **语言 / Language** button on the main toolbar to switch between automatic Windows-language detection, Simplified Chinese, English, and any additional `lang\*.lng` catalogs. The change is applied immediately and remembered per Windows user. The packaged `language.ini` defaults to `auto`; `Ctrl+Shift+R` also reloads the active catalog after manual edits.
+
+See [Interface languages](docs/I18N.md) for the lookup order and custom-language file format.
 ## SciTE configuration
 
 Existing SciTE property files can be reused. Put `SciTEGlobal.properties`, `SciTEUser.properties`,
@@ -138,6 +144,7 @@ open in rendered preview; other accepted text opens in the editor.
 ## Keyboard
 
 - `Ctrl+S`: save
+- `Ctrl+Shift+S`: save as and continue editing the new file
 - `Ctrl+F`: focus the search box
 - `Ctrl+H`: open the modeless find-and-replace window while editing
 - `Ctrl+M`: cycle Markdown/HTML through preview, edit, and split view

@@ -1,11 +1,14 @@
 #include "document.hpp"
 #include "html_preview.hpp"
+#include "i18n.hpp"
 #include "markdown.hpp"
 #include "scite_properties.hpp"
 #include "session_state.hpp"
 #include "text_detection.hpp"
 
 #include <windows.h>
+
+#include <algorithm>
 
 #include <cmath>
 #include <filesystem>
@@ -68,7 +71,7 @@ int main() {
         "Markdown highlight spans render without changing inline code");
     check(extensionHtml.find(L"editmdview-callout-note") != std::wstring::npos &&
         extensionHtml.find(L"editmdview-callout-warning") != std::wstring::npos &&
-        extensionHtml.find(L"注释") != std::wstring::npos && extensionHtml.find(L"注意") != std::wstring::npos,
+        extensionHtml.find(L"Note") != std::wstring::npos && extensionHtml.find(L"Warning") != std::wstring::npos,
         "GitHub-style callouts render with localized styled titles");
 
     const std::wstring outlineHtml = render_markdown_html(
@@ -135,6 +138,21 @@ int main() {
     check(reloaded.load(temp, error), "saved document reloads");
     check(reloaded.text() == "# Changed\r\n", "saved text preserved");
     check(reloaded.encoding() == TextEncoding::Utf8Bom, "saved encoding preserved");
+
+    const auto savedAs = std::filesystem::temp_directory_path() /
+        (L"editmdview-save-as-test-" + std::to_wstring(GetCurrentProcessId()) + L".html");
+    std::filesystem::remove(savedAs);
+    check(document.save_as(savedAs, "<h1>Saved as</h1>\r\n", error), "document saves under a new path");
+    check(document.path() == savedAs && document.is_html() && document.supports_preview(),
+        "save as switches the active path and document type");
+    Document savedAsDocument;
+    check(savedAsDocument.load(savedAs, error), "saved-as document reloads");
+    check(savedAsDocument.text() == "<h1>Saved as</h1>\r\n" &&
+        savedAsDocument.encoding() == TextEncoding::Utf8Bom,
+        "save as preserves content and source encoding");
+    Document originalAfterSaveAs;
+    check(originalAfterSaveAs.load(temp, error) && originalAfterSaveAs.text() == "# Changed\r\n",
+        "save as does not rewrite the original file");
 
     const auto mixedEol = std::filesystem::temp_directory_path() /
         (L"editmdview-eol-test-" + std::to_wstring(GetCurrentProcessId()) + L".txt");
@@ -384,6 +402,50 @@ int main() {
     check(!confConfig.value("command.build.*.conf").has_value(),
         "unsupported language commands are not bundled");
 
+    const auto i18nDirectory = std::filesystem::temp_directory_path() /
+        (L"editmdview-i18n-" + std::to_wstring(GetCurrentProcessId()));
+    std::filesystem::create_directories(i18nDirectory / L"lang");
+    {
+        std::ofstream output(i18nDirectory / L"lang" / L"en-US.lng", std::ios::binary);
+        output << "Save=Save\nTest newline=Line one\\nLine two\n";
+    }
+    {
+        std::ofstream output(i18nDirectory / L"lang" / L"fr-FR.lng", std::ios::binary);
+        output << "Save=Enregistrer\n";
+    }
+    {
+        std::ofstream output(i18nDirectory / L"lang" / L"zh-CN.lng", std::ios::binary);
+        output << "Save=保存\n";
+    }
+    const auto previousLanguage = environment_value(L"EDITMDVIEW_LANGUAGE");
+    SetEnvironmentVariableW(L"EDITMDVIEW_LANGUAGE", L"en-US");
+    const auto i18nModule = i18nDirectory / L"EditMdView.wlx64";
+    i18n::initialize(i18nModule);
+    check(i18n::language() == L"en-US" && i18n::text(L"Save") == L"Save",
+        "English UI language file loads by locale code");
+    check(i18n::text_utf8("Test newline") == "Line one\nLine two",
+        "language file escape sequences decode");
+    SetEnvironmentVariableW(L"EDITMDVIEW_LANGUAGE", L"zh-CN");
+    i18n::initialize(i18nModule);
+    check(i18n::text(L"Save") == L"保存",
+        "Simplified Chinese catalog translates English source keys");
+    const auto languages = i18n::available_languages(i18nModule);
+    check(std::find(languages.begin(), languages.end(), L"fr-FR") != languages.end(),
+        "custom language files are discovered for the toolbar menu");
+    const auto previousLocalAppData = environment_value(L"LOCALAPPDATA");
+    const auto languagePreferenceRoot = i18nDirectory / L"user-data";
+    SetEnvironmentVariableW(L"EDITMDVIEW_LANGUAGE", nullptr);
+    SetEnvironmentVariableW(L"LOCALAPPDATA", languagePreferenceRoot.c_str());
+    std::wstring languageError;
+    check(i18n::select_language(i18nModule, L"fr-FR", languageError) &&
+        i18n::selected_language() == L"fr-FR" && i18n::text(L"Save") == L"Enregistrer",
+        "toolbar language selection persists and applies immediately");
+    check(std::filesystem::is_regular_file(
+        languagePreferenceRoot / L"EditMdView" / L"language.ini"),
+        "toolbar language preference is stored outside the protected plugin folder");
+    restore_environment(L"LOCALAPPDATA", previousLocalAppData);
+    restore_environment(L"EDITMDVIEW_LANGUAGE", previousLanguage);
+    i18n::initialize(i18nModule);
     const auto runtimeStateDirectory = std::filesystem::temp_directory_path() /
         (L"editmdview-runtime-state-" + std::to_wstring(GetCurrentProcessId()));
     const auto runtimeStateDocument = runtimeStateDirectory / L"文档.md";
@@ -391,6 +453,7 @@ int main() {
     savedView.anchor = 17;
     savedView.caret = 29;
     savedView.firstVisibleLine = 8;
+    savedView.topVisiblePosition = 113;
     savedView.horizontalOffset = 31;
     savedView.previewScrollFraction = 0.625;
     savedView.splitRatio = 0.7;
@@ -399,7 +462,8 @@ int main() {
         "document view state saves atomically");
     const auto loadedView = load_persisted_view_state(runtimeStateDirectory, runtimeStateDocument);
     check(loadedView && loadedView->anchor == 17 && loadedView->caret == 29 &&
-        loadedView->firstVisibleLine == 8 && loadedView->horizontalOffset == 31 &&
+        loadedView->firstVisibleLine == 8 && loadedView->topVisiblePosition == 113 &&
+        loadedView->horizontalOffset == 31 &&
         std::abs(loadedView->previewScrollFraction - 0.625) < 0.000001 &&
         std::abs(loadedView->splitRatio - 0.7) < 0.000001 && loadedView->mode == 1,
         "document view state round-trips");
@@ -415,12 +479,14 @@ int main() {
 
     std::error_code removeError;
     std::filesystem::remove(temp, removeError);
+    std::filesystem::remove(savedAs, removeError);
     std::filesystem::remove(mixedEol, removeError);
     std::filesystem::remove(htmlFile, removeError);
     std::filesystem::remove(uncommonText, removeError);
     std::filesystem::remove(binaryFile, removeError);
     std::filesystem::remove(bomlessUtf16, removeError);
     std::filesystem::remove_all(propertiesDirectory, removeError);
+    std::filesystem::remove_all(i18nDirectory, removeError);
     std::filesystem::remove_all(runtimeStateDirectory, removeError);
     return failures == 0 ? 0 : 1;
 }

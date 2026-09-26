@@ -1,5 +1,5 @@
 #include "markdown.hpp"
-
+#include "i18n.hpp"
 #include <windows.h>
 
 #include <md4c.h>
@@ -291,11 +291,12 @@ std::string render_outline(const std::vector<SourceMapContext::Heading>& heading
     for (const auto& heading : headings) minimumLevel = std::min(minimumLevel, heading.level);
     const std::size_t naturalHeight = std::min<std::size_t>(420, headings.size() * 10 + 2);
     std::string outline =
-        "<nav class=\"editmdview-outline\" aria-label=\"文档目录\" style=\"--outline-height:" +
+        "<nav class=\"editmdview-outline\" aria-label=\"" +
+        escape_attribute(i18n::text_utf8("Document outline")) + "\" style=\"--outline-height:" +
         std::to_string(naturalHeight) + "px\">";
     for (const auto& heading : headings) {
         const unsigned depth = std::min(6u, heading.level - minimumLevel + 1);
-        const std::string label = heading.text.empty() ? "未命名标题" : heading.text;
+        const std::string label = heading.text.empty() ? i18n::text_utf8("Untitled heading") : heading.text;
         outline += "<a class=\"outline-depth-" + std::to_string(depth) + "\" href=\"#" +
             escape_attribute(heading.id) + "\">"
             "<span class=\"outline-mark\" aria-hidden=\"true\"></span>"
@@ -402,11 +403,11 @@ void enhance_callout(std::string& html, std::string_view name, std::string_view 
 
 void enhance_markdown_extensions(std::string& html) {
     html = enhance_highlight_spans(html);
-    enhance_callout(html, "note", "ⓘ 注释");
-    enhance_callout(html, "important", "◆ 重要");
-    enhance_callout(html, "tip", "✦ 提示");
-    enhance_callout(html, "warning", "△ 注意");
-    enhance_callout(html, "caution", "! 警告");
+    enhance_callout(html, "note", "ⓘ " + i18n::text_utf8("Note"));
+    enhance_callout(html, "important", "◆ " + i18n::text_utf8("Important"));
+    enhance_callout(html, "tip", "✦ " + i18n::text_utf8("Tip"));
+    enhance_callout(html, "warning", "△ " + i18n::text_utf8("Warning"));
+    enhance_callout(html, "caution", "! " + i18n::text_utf8("Caution"));
 }
 
 } // namespace

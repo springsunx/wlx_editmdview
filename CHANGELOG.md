@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.10
+
+- Added interface localization with Simplified Chinese and English catalogs, automatic Windows
+  locale detection, external `lang\*.lng` catalogs, and an immediate language switcher on the main toolbar.
+- Added Save As from the More menu and `Ctrl+Shift+S`, retaining the current encoding,
+  line endings, editor position, privileged-save fallback, and file-type-aware preview/highlighting.
+- Fixed editor content shifting after closing and reopening Lister, including wrapped long
+  lines and cases where the caret is outside the visible viewport.
+- Restored the saved viewport after the final window layout and retained compatibility with
+  view-state files written by version 0.5.9.
+- Fixed `font.comment` so it supplies the default typeface and size for comment styles in every
+  bundled lexer, while explicit `style.*.N` and `style.<lexer>.N` settings still take precedence.
+
 ## 0.5.9
 
 - Added native x86 and x64 builds to one Total Commander installation package.

@@ -17,7 +17,8 @@
 namespace editmdview {
 namespace {
 
-constexpr std::string_view kViewHeader = "EditMdView view state v1";
+constexpr std::string_view kViewHeaderV1 = "EditMdView view state v1";
+constexpr std::string_view kViewHeaderV2 = "EditMdView view state v2";
 constexpr std::string_view kRecoveryHeader = "EditMdView recovery v1";
 constexpr std::uintmax_t kMaximumRecoverySize = 64ULL * 1024ULL * 1024ULL;
 constexpr std::size_t kMaximumViewStates = 128;
@@ -157,20 +158,25 @@ std::optional<PersistedViewState> load_persisted_view_state(
     std::string header;
     std::string encodedPath;
     PersistedViewState state;
-    if (!std::getline(input, header) || header != kViewHeader ||
+    if (!std::getline(input, header) ||
+        (header != kViewHeaderV1 && header != kViewHeaderV2) ||
         !std::getline(input, encodedPath)) return std::nullopt;
     const auto decodedPath = hex_decode(encodedPath);
     if (!decodedPath || *decodedPath != wide_to_utf8(normalized_key(documentPath))) return std::nullopt;
     long long anchor = 0;
     long long caret = 0;
+    long long topVisiblePosition = -1;
     if (!(input >> anchor >> caret >> state.firstVisibleLine >> state.horizontalOffset >>
             state.previewScrollFraction >> state.splitRatio >> state.mode)) return std::nullopt;
+    if (header == kViewHeaderV2 && !(input >> topVisiblePosition)) return std::nullopt;
     if (!std::isfinite(state.previewScrollFraction) || !std::isfinite(state.splitRatio) ||
-        state.firstVisibleLine < 0 || state.horizontalOffset < 0 || state.mode < 0 || state.mode > 2) {
+        state.firstVisibleLine < 0 || topVisiblePosition < -1 || state.horizontalOffset < 0 ||
+        state.mode < 0 || state.mode > 2) {
         return std::nullopt;
     }
     state.anchor = static_cast<std::intptr_t>(anchor);
     state.caret = static_cast<std::intptr_t>(caret);
+    state.topVisiblePosition = static_cast<std::intptr_t>(topVisiblePosition);
     state.previewScrollFraction = std::clamp(state.previewScrollFraction, 0.0, 1.0);
     state.splitRatio = std::clamp(state.splitRatio, 0.1, 0.9);
     return state;
@@ -184,11 +190,11 @@ bool save_persisted_view_state(const std::filesystem::path& dataDirectory,
     {
         std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
         if (!output) return false;
-        output << kViewHeader << '\n' << hex_encode(wide_to_utf8(normalized_key(documentPath))) << '\n'
+        output << kViewHeaderV2 << '\n' << hex_encode(wide_to_utf8(normalized_key(documentPath))) << '\n'
             << static_cast<long long>(state.anchor) << ' ' << static_cast<long long>(state.caret) << ' '
             << state.firstVisibleLine << ' ' << state.horizontalOffset << ' '
             << std::setprecision(17) << state.previewScrollFraction << ' ' << state.splitRatio << ' '
-            << state.mode << '\n';
+            << state.mode << ' ' << static_cast<long long>(state.topVisiblePosition) << '\n';
         output.close();
         if (!output) {
             DeleteFileW(temporary.c_str());

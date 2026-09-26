@@ -24,6 +24,6 @@ jobs:
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: EditMdView-v0.5.9
-          path: dist/EditMdView-v0.5.9.zip
+          name: EditMdView-v0.5.10
+          path: dist/EditMdView-v0.5.10.zip
           if-no-files-found: error

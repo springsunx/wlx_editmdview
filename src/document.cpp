@@ -1,4 +1,5 @@
 #include "document.hpp"
+#include "i18n.hpp"
 #include "text_detection.hpp"
 
 #include <windows.h>
@@ -101,7 +102,7 @@ std::vector<std::uint8_t> encode_text(std::string_view utf8, TextEncoding encodi
 
     const std::wstring wide = bytes_to_wide(utf8, CP_UTF8, MB_ERR_INVALID_CHARS);
     if (!utf8.empty() && wide.empty()) {
-        error = L"编辑内容不是有效的 UTF-8 文本。";
+        error = i18n::text(L"The edited content is not valid UTF-8 text.");
         return {};
     }
 
@@ -127,14 +128,14 @@ std::vector<std::uint8_t> encode_text(std::string_view utf8, TextEncoding encodi
     const int required = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, wide.data(),
         static_cast<int>(wide.size()), nullptr, 0, nullptr, &usedDefault);
     if (required < 0 || usedDefault) {
-        error = L"当前系统编码无法表示文档中的部分字符；请改用 UTF-8 保存。";
+        error = i18n::text(L"Some characters cannot be represented by the current system encoding. Save as UTF-8 instead.");
         return {};
     }
     output.resize(static_cast<std::size_t>(required));
     WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, wide.data(), static_cast<int>(wide.size()),
         reinterpret_cast<char*>(output.data()), required, nullptr, &usedDefault);
     if (usedDefault) {
-        error = L"当前系统编码无法表示文档中的部分字符；请改用 UTF-8 保存。";
+        error = i18n::text(L"Some characters cannot be represented by the current system encoding. Save as UTF-8 instead.");
         return {};
     }
     return output;
@@ -144,7 +145,7 @@ std::wstring windows_error(DWORD code) {
     wchar_t* buffer = nullptr;
     const DWORD count = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
         FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, code, 0, reinterpret_cast<wchar_t*>(&buffer), 0, nullptr);
-    std::wstring message = count && buffer ? std::wstring(buffer, count) : L"未知错误";
+    std::wstring message = count && buffer ? std::wstring(buffer, count) : i18n::text(L"Unknown error");
     if (buffer) LocalFree(buffer);
     while (!message.empty() && (message.back() == L'\r' || message.back() == L'\n')) message.pop_back();
     return message;
@@ -198,14 +199,14 @@ bool create_staging_file(const std::vector<std::uint8_t>& bytes,
     const DWORD directoryLength = GetTempPathW(static_cast<DWORD>(tempDirectory.size()),
         tempDirectory.data());
     if (directoryLength == 0 || directoryLength >= tempDirectory.size()) {
-        error = L"无法取得提权保存所需的临时目录：" + windows_error(GetLastError());
+        error = i18n::text(L"Unable to obtain a temporary folder for elevated saving:") + L" " + windows_error(GetLastError());
         return false;
     }
     tempDirectory.resize(directoryLength);
 
     std::wstring tempFile(MAX_PATH + 1, L'\0');
     if (!GetTempFileNameW(tempDirectory.c_str(), L"EMV", 0, tempFile.data())) {
-        error = L"无法创建提权保存所需的临时文件：" + windows_error(GetLastError());
+        error = i18n::text(L"Unable to create the temporary file for elevated saving:") + L" " + windows_error(GetLastError());
         return false;
     }
     tempFile.resize(wcslen(tempFile.c_str()));
@@ -215,7 +216,7 @@ bool create_staging_file(const std::vector<std::uint8_t>& bytes,
     if (!write_bytes(staging, bytes, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY, failure)) {
         DeleteFileW(staging.c_str());
         staging.clear();
-        error = L"无法写入提权保存所需的临时文件：" + windows_error(failure);
+        error = i18n::text(L"Unable to write the temporary file for elevated saving:") + L" " + windows_error(failure);
         return false;
     }
     return true;
@@ -227,24 +228,24 @@ bool Document::load(const std::filesystem::path& path, std::wstring& error) {
     std::error_code ec;
     const auto size = std::filesystem::file_size(path, ec);
     if (ec) {
-        error = L"无法读取文件大小。";
+        error = i18n::text(L"Unable to read the file size.");
         return false;
     }
     if (size > kMaximumFileSize) {
-        error = L"首版暂不打开超过 64 MB 的文件。";
+        error = i18n::text(L"Files larger than 64 MB are not supported.");
         return false;
     }
 
     std::ifstream stream(path, std::ios::binary);
     if (!stream) {
-        error = L"无法打开文件。";
+        error = i18n::text(L"Unable to open the file.");
         return false;
     }
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     if (!bytes.empty()) {
         stream.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
         if (!stream) {
-            error = L"读取文件时发生错误。";
+            error = i18n::text(L"An error occurred while reading the file.");
             return false;
         }
     }
@@ -262,7 +263,7 @@ bool Document::load(const std::filesystem::path& path, std::wstring& error) {
     } else {
         const TextContentKind contentKind = detect_text_content(bytes);
         if (contentKind == TextContentKind::Binary) {
-            error = L"文件内容看起来是二进制数据。";
+            error = i18n::text(L"The file appears to contain binary data.");
             return false;
         }
         if (contentKind == TextContentKind::Utf16Le || contentKind == TextContentKind::Utf16Be) {
@@ -309,12 +310,12 @@ bool Document::capture_file_stamp(std::wstring& error) {
     std::error_code ec;
     lastWriteTime_ = std::filesystem::last_write_time(path_, ec);
     if (ec) {
-        error = L"无法读取文件时间戳。";
+        error = i18n::text(L"Unable to read the file timestamp.");
         return false;
     }
     fileSize_ = std::filesystem::file_size(path_, ec);
     if (ec) {
-        error = L"无法读取文件大小。";
+        error = i18n::text(L"Unable to read the file size.");
         return false;
     }
     return true;
@@ -330,31 +331,52 @@ bool Document::changed_on_disk() const {
 
 bool Document::save(std::string_view utf8Text, std::wstring& error,
     const PrivilegedSaveHandler& privilegedSave) {
+    return save_to(path_, utf8Text, true, error, privilegedSave);
+}
+
+bool Document::save_as(const std::filesystem::path& targetPath, std::string_view utf8Text,
+    std::wstring& error, const PrivilegedSaveHandler& privilegedSave) {
+    if (targetPath.empty()) {
+        error = i18n::text(L"The Save As path cannot be empty.");
+        return false;
+    }
+    const std::wstring current = path_.lexically_normal().wstring();
+    const std::wstring target = targetPath.lexically_normal().wstring();
+    const bool sameFile = _wcsicmp(current.c_str(), target.c_str()) == 0;
+    return save_to(targetPath, utf8Text, sameFile, error, privilegedSave);
+}
+
+bool Document::save_to(const std::filesystem::path& targetPath, std::string_view utf8Text,
+    bool rejectExternalChanges, std::wstring& error,
+    const PrivilegedSaveHandler& privilegedSave) {
     error.clear();
-    if (changed_on_disk()) {
-        error = L"文件已被其他程序修改。请重新打开后再保存，以免覆盖外部更改。";
+    if (rejectExternalChanges && changed_on_disk()) {
+        error = i18n::text(L"The file was modified by another program. Reopen it before saving to avoid overwriting external changes.");
         return false;
     }
 
     auto bytes = encode_text(utf8Text, encoding_, error);
     if (!error.empty()) return false;
 
+    const auto finishSave = [&]() {
+        path_ = targetPath;
+        text_.assign(utf8Text);
+        return capture_file_stamp(error);
+    };
     const auto saveWithPrivileges = [&]() {
         if (!privilegedSave) return false;
         std::filesystem::path staging;
         if (!create_staging_file(bytes, staging, error)) return false;
-        const bool saved = privilegedSave(staging, path_, error);
+        const bool saved = privilegedSave(staging, targetPath, error);
         DeleteFileW(staging.c_str());
-        if (!saved) return false;
-        text_.assign(utf8Text);
-        return capture_file_stamp(error);
+        return saved && finishSave();
     };
 
     std::filesystem::path temporary;
     DWORD writeFailure = ERROR_FILE_EXISTS;
     bool temporaryWritten = false;
     for (unsigned int attempt = 0; attempt < 32; ++attempt) {
-        temporary = adjacent_temporary_path(path_, attempt);
+        temporary = adjacent_temporary_path(targetPath, attempt);
         if (write_bytes(temporary, bytes, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, writeFailure)) {
             temporaryWritten = true;
             break;
@@ -366,36 +388,35 @@ bool Document::save(std::string_view utf8Text, std::wstring& error,
             DeleteFileW(temporary.c_str());
         }
         if (permission_error(writeFailure) && privilegedSave) return saveWithPrivileges();
-        error = L"无法创建或写入临时文件：" + windows_error(writeFailure);
+        error = i18n::text(L"Unable to create or write the temporary file:") + L" " + windows_error(writeFailure);
         return false;
     }
 
-    if (!ReplaceFileW(path_.c_str(), temporary.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS,
+    if (!ReplaceFileW(targetPath.c_str(), temporary.c_str(), nullptr, REPLACEFILE_IGNORE_MERGE_ERRORS,
             nullptr, nullptr)) {
         const DWORD replaceError = GetLastError();
-        if (!MoveFileExW(temporary.c_str(), path_.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        if (!MoveFileExW(temporary.c_str(), targetPath.c_str(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
             const DWORD moveError = GetLastError();
             DeleteFileW(temporary.c_str());
             if ((permission_error(replaceError) || permission_error(moveError)) && privilegedSave) {
                 return saveWithPrivileges();
             }
-            error = L"替换原文件失败：" + windows_error(moveError);
+            error = i18n::text(L"Unable to replace the target file:") + L" " + windows_error(moveError);
             return false;
         }
     }
 
-    text_.assign(utf8Text);
-    return capture_file_stamp(error);
+    return finishSave();
 }
-
-const wchar_t* Document::encoding_name() const noexcept {
+std::wstring Document::encoding_name() const {
     switch (encoding_) {
     case TextEncoding::Utf8: return L"UTF-8";
     case TextEncoding::Utf8Bom: return L"UTF-8 BOM";
     case TextEncoding::Utf16Le: return L"UTF-16 LE";
     case TextEncoding::Utf16Be: return L"UTF-16 BE";
-    case TextEncoding::Utf16LeNoBom: return L"UTF-16 LE (无 BOM)";
-    case TextEncoding::Utf16BeNoBom: return L"UTF-16 BE (无 BOM)";
+    case TextEncoding::Utf16LeNoBom: return i18n::text(L"UTF-16 LE (no BOM)");
+    case TextEncoding::Utf16BeNoBom: return i18n::text(L"UTF-16 BE (no BOM)");
     case TextEncoding::Ansi: return L"ANSI";
     }
     return L"UTF-8";

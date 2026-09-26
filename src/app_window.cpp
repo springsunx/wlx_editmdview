@@ -1,11 +1,13 @@
 #include "app_window.hpp"
 
 #include "html_preview.hpp"
+#include "i18n.hpp"
 #include "markdown.hpp"
 #include "wlx_api.h"
 
 #include <Scintilla.h>
 #include <commctrl.h>
+#include <commdlg.h>
 #include <objbase.h>
 #include <shellapi.h>
 #include <windowsx.h>
@@ -24,6 +26,7 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 namespace editmdview {
 namespace {
@@ -56,6 +59,8 @@ constexpr UINT kMessageMarkdownSlash = WM_APP + 14;
 constexpr UINT kMessagePreviewFindResult = WM_APP + 15;
 constexpr UINT kMessagePreviewReady = WM_APP + 16;
 constexpr UINT kMessageReloadConfiguration = WM_APP + 17;
+constexpr UINT kMessageRestoreEditorView = WM_APP + 18;
+constexpr UINT kMessageSaveAs = WM_APP + 19;
 
 constexpr int kIdEdit = 1001;
 constexpr int kIdSplit = 1002;
@@ -67,6 +72,7 @@ constexpr int kIdFindNext = 1007;
 constexpr int kIdMore = 1008;
 constexpr int kIdReplace = 1009;
 constexpr int kIdSplitDivider = 1010;
+constexpr int kIdLanguage = 1011;
 
 constexpr int kMenuUndo = 2001;
 constexpr int kMenuRedo = 2002;
@@ -82,11 +88,14 @@ constexpr int kMenuZoomOut = 2011;
 constexpr int kMenuZoomReset = 2012;
 constexpr int kMenuReplace = 2013;
 constexpr int kMenuReloadConfiguration = 2014;
+constexpr int kMenuSave = 2015;
+constexpr int kMenuSaveAs = 2016;
 
 constexpr int kMenuEolCrLf = 4101;
 constexpr int kMenuEolLf = 4102;
 constexpr int kMenuEolCr = 4103;
 constexpr int kMenuLanguageBase = 4200;
+constexpr int kMenuUiLanguageBase = 4400;
 
 constexpr int kStatusCaret = 0;
 constexpr int kStatusLanguage = 1;
@@ -95,7 +104,7 @@ constexpr int kStatusEol = 3;
 constexpr int kStatusState = 4;
 
 constexpr std::array<std::pair<SyntaxLanguage, const wchar_t*>, 21> kLanguages = {{
-    {SyntaxLanguage::Plain, L"纯文本"},
+    {SyntaxLanguage::Plain, L"Plain text"},
     {SyntaxLanguage::Markdown, L"Markdown"},
     {SyntaxLanguage::Cpp, L"C/C++/Java"},
     {SyntaxLanguage::JavaScript, L"JavaScript/TypeScript"},
@@ -107,8 +116,8 @@ constexpr std::array<std::pair<SyntaxLanguage, const wchar_t*>, 21> kLanguages =
     {SyntaxLanguage::Bash, L"Shell"},
     {SyntaxLanguage::Sql, L"SQL"},
     {SyntaxLanguage::Yaml, L"YAML"},
-    {SyntaxLanguage::Properties, L"配置文件"},
-    {SyntaxLanguage::Conf, L"Apache 配置"},
+    {SyntaxLanguage::Properties, L"Properties"},
+    {SyntaxLanguage::Conf, L"Apache config"},
     {SyntaxLanguage::CMake, L"CMake"},
     {SyntaxLanguage::Makefile, L"Makefile"},
     {SyntaxLanguage::Batch, L"Batch"},
@@ -148,21 +157,21 @@ struct SlashCommand {
 };
 
 constexpr std::array<SlashCommand, 15> kSlashCommands = {{
-    {"h1", L"H1", L"一级标题", L"大标题", L"h1 heading 标题1 一级"},
-    {"h2", L"H2", L"二级标题", L"中标题", L"h2 heading 标题2 二级"},
-    {"h3", L"H3", L"三级标题", L"小标题", L"h3 heading 标题3 三级"},
-    {"l1", L"•", L"无序列表", L"无序列表", L"l1 ul bullet list 列表"},
-    {"l2", L"1.", L"有序列表", L"有序列表", L"l2 ol numbered list 编号"},
-    {"l3", L"☑", L"任务列表", L"带复选框的任务列表", L"l3 todo task checklist 任务"},
-    {"code", L"</>", L"代码块", L"围栏代码块", L"code codeblock 代码"},
-    {"quote", L"❞", L"引用", L"引用文本", L"quote blockquote 引用"},
-    {"table", L"▦", L"表格", L"设置行列后插入", L"table grid 表格"},
-    {"v1", L"i", L"注释", L"注释提示块", L"v1 note info 注释"},
-    {"v2", L"!", L"重要", L"重要提示块", L"v2 important 重要"},
-    {"v3", L"✦", L"提示", L"提示信息块", L"v3 tip hint 提示"},
-    {"v4", L"△", L"注意", L"注意警告块", L"v4 warning 注意"},
-    {"v5", L"!", L"警告", L"警告提示块", L"v5 caution danger 警告"},
-    {"link", L"↗", L"内部链接", L"插入 Markdown 链接", L"link url href 链接"},
+    {"h1", L"H1", L"Heading 1", L"Large heading", L"h1 heading 标题1 一级"},
+    {"h2", L"H2", L"Heading 2", L"Medium heading", L"h2 heading 标题2 二级"},
+    {"h3", L"H3", L"Heading 3", L"Small heading", L"h3 heading 标题3 三级"},
+    {"l1", L"•", L"Bulleted list", L"Bulleted list", L"l1 ul bullet list 列表"},
+    {"l2", L"1.", L"Numbered list", L"Numbered list", L"l2 ol numbered list 编号"},
+    {"l3", L"☑", L"Task list", L"Task list with checkboxes", L"l3 todo task checklist 任务"},
+    {"code", L"</>", L"Code block", L"Fenced code block", L"code codeblock 代码"},
+    {"quote", L"❞", L"Quote", L"Quoted text", L"quote blockquote 引用"},
+    {"table", L"▦", L"Table", L"Choose rows and columns", L"table grid 表格"},
+    {"v1", L"i", L"Note", L"Note callout", L"v1 note info 注释"},
+    {"v2", L"!", L"Important", L"Important callout", L"v2 important 重要"},
+    {"v3", L"✦", L"Tip", L"Tip callout", L"v3 tip hint 提示"},
+    {"v4", L"△", L"Warning", L"Warning callout", L"v4 warning 注意"},
+    {"v5", L"!", L"Caution", L"Caution callout", L"v5 caution danger 警告"},
+    {"link", L"↗", L"Internal link", L"Insert a Markdown link", L"link url href 链接"},
 }};
 
 std::wstring lower_wide(std::wstring value) {
@@ -277,6 +286,65 @@ std::wstring file_title(const std::filesystem::path& path) {
     return filename.empty() ? path.wstring() : filename;
 }
 
+bool prompt_for_save_path(HWND owner, const std::filesystem::path& currentPath,
+    std::filesystem::path& selectedPath, std::wstring& error) {
+    std::wstring filters;
+    const auto appendFilter = [&filters](const std::wstring& label, const wchar_t* pattern) {
+        filters += label;
+        filters.push_back(L'\0');
+        filters += pattern;
+        filters.push_back(L'\0');
+    };
+    appendFilter(i18n::text(L"Markdown documents") + L" (*.md;*.markdown)", L"*.md;*.markdown");
+    appendFilter(i18n::text(L"HTML documents") + L" (*.html;*.htm)", L"*.html;*.htm");
+    appendFilter(i18n::text(L"Text and code files") +
+        L" (*.txt;*.log;*.ini;*.json;*.xml;*.yaml;*.cpp;*.lsp)",
+        L"*.txt;*.log;*.ini;*.cfg;*.conf;*.json;*.xml;*.yaml;*.yml;*.csv;*.cpp;*.c;*.h;*.hpp;*.py;*.js;*.ts;*.css;*.lsp");
+    appendFilter(i18n::text(L"All files") + L" (*.*)", L"*.*");
+    filters.push_back(L'\0');
+
+    std::vector<wchar_t> fileBuffer(32768, L'\0');
+    const std::wstring current = currentPath.wstring();
+    if (current.size() >= fileBuffer.size()) {
+        error = i18n::text(L"The current path is too long for the Save As dialog.");
+        return false;
+    }
+    std::copy(current.begin(), current.end(), fileBuffer.begin());
+
+    std::wstring extension = lower_wide(currentPath.extension().wstring());
+    if (!extension.empty() && extension.front() == L'.') extension.erase(extension.begin());
+    if (extension.empty()) extension = L"txt";
+    DWORD filterIndex = 3;
+    if (extension == L"md" || extension == L"markdown") filterIndex = 1;
+    else if (extension == L"html" || extension == L"htm") filterIndex = 2;
+
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = owner;
+    dialog.lpstrFilter = filters.c_str();
+    dialog.nFilterIndex = filterIndex;
+    dialog.lpstrFile = fileBuffer.data();
+    dialog.nMaxFile = static_cast<DWORD>(fileBuffer.size());
+    const std::wstring dialogTitle = i18n::text(L"Save As");
+    dialog.lpstrTitle = dialogTitle.c_str();
+    dialog.lpstrDefExt = extension.c_str();
+    dialog.Flags = OFN_EXPLORER | OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST |
+        OFN_NOCHANGEDIR | OFN_HIDEREADONLY;
+    if (GetSaveFileNameW(&dialog)) {
+        selectedPath = std::filesystem::path(fileBuffer.data());
+        error.clear();
+        return true;
+    }
+    const DWORD dialogError = CommDlgExtendedError();
+    if (dialogError != 0) {
+        error = i18n::text(L"Unable to open the Save As dialog (error code") + L" " +
+            std::to_wstring(dialogError) + L"）。";
+    } else {
+        error.clear();
+    }
+    return false;
+}
+
 std::filesystem::path module_path(HINSTANCE instance) {
     std::wstring buffer(32768, L'\0');
     const DWORD length = GetModuleFileNameW(instance, buffer.data(), static_cast<DWORD>(buffer.size()));
@@ -289,7 +357,7 @@ std::wstring windows_error_message(DWORD code) {
     wchar_t* buffer = nullptr;
     const DWORD count = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
         FORMAT_MESSAGE_IGNORE_INSERTS, nullptr, code, 0, reinterpret_cast<wchar_t*>(&buffer), 0, nullptr);
-    std::wstring message = count && buffer ? std::wstring(buffer, count) : L"未知错误";
+    std::wstring message = count && buffer ? std::wstring(buffer, count) : i18n::text(L"Unknown error");
     if (buffer) LocalFree(buffer);
     while (!message.empty() && (message.back() == L'\r' || message.back() == L'\n')) message.pop_back();
     return message;
@@ -301,7 +369,7 @@ bool run_elevated_save_helper(HWND owner, HINSTANCE instance,
     const std::filesystem::path helper = module_path(instance).parent_path() / L"EditMdViewSave.exe";
     std::error_code fileError;
     if (!std::filesystem::is_regular_file(helper, fileError)) {
-        error = L"受保护目录需要管理员权限，但插件目录中缺少 EditMdViewSave.exe。请重新安装完整插件包。";
+        error = i18n::text(L"The protected folder requires administrator access, but EditMdViewSave.exe is missing. Reinstall the complete plugin package.");
         return false;
     }
 
@@ -321,12 +389,12 @@ bool run_elevated_save_helper(HWND owner, HINSTANCE instance,
     if (!ShellExecuteExW(&execution)) {
         const DWORD launchError = GetLastError();
         error = launchError == ERROR_CANCELLED
-            ? L"已取消管理员权限请求，文件没有保存。"
-            : L"无法启动管理员权限保存程序：" + windows_error_message(launchError);
+            ? i18n::text(L"The administrator request was cancelled. The file was not saved.")
+            : i18n::text(L"Unable to start the elevated save helper:") + L" " + windows_error_message(launchError);
         return false;
     }
     if (!execution.hProcess) {
-        error = L"管理员权限保存程序未返回进程句柄。";
+        error = i18n::text(L"The elevated save helper did not return a process handle.");
         return false;
     }
 
@@ -340,11 +408,11 @@ bool run_elevated_save_helper(HWND owner, HINSTANCE instance,
     }
     CloseHandle(execution.hProcess);
     if (!readExitCode) {
-        error = L"等待管理员权限保存程序时发生错误：" + windows_error_message(waitError);
+        error = i18n::text(L"An error occurred while waiting for the elevated save helper:") + L" " + windows_error_message(waitError);
         return false;
     }
     if (exitCode != ERROR_SUCCESS) {
-        error = L"管理员权限保存失败：" + windows_error_message(exitCode);
+        error = i18n::text(L"Elevated save failed:") + L" " + windows_error_message(exitCode);
         return false;
     }
     return true;
@@ -412,18 +480,18 @@ int prompt_for_line(HWND owner, HINSTANCE instance, HFONT uiFont, int currentLin
 
     GoToLineState state;
     HWND dialog = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_CONTROLPARENT, kGoToLineClass,
-        L"跳转到行", WS_POPUP | WS_CAPTION | WS_SYSMENU, x, y, width, height,
+        i18n::text(L"Go to Line").c_str(), WS_POPUP | WS_CAPTION | WS_SYSMENU, x, y, width, height,
         root, nullptr, instance, &state);
     if (!dialog) return 0;
 
-    HWND label = CreateWindowExW(0, L"STATIC", L"行号：", WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE,
+    HWND label = CreateWindowExW(0, L"STATIC", i18n::text(L"Line:").c_str(), WS_CHILD | WS_VISIBLE | SS_CENTERIMAGE,
         18, 18, 60, 26, dialog, nullptr, instance, nullptr);
     HWND edit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP |
         ES_NUMBER | ES_AUTOHSCROLL, 78, 18, 216, 26, dialog,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(kGoToLineEdit)), instance, nullptr);
-    HWND ok = CreateWindowExW(0, L"BUTTON", L"确定", WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
+    HWND ok = CreateWindowExW(0, L"BUTTON", i18n::text(L"OK").c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON,
         132, 62, 76, 28, dialog, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDOK)), instance, nullptr);
-    HWND cancel = CreateWindowExW(0, L"BUTTON", L"取消", WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+    HWND cancel = CreateWindowExW(0, L"BUTTON", i18n::text(L"Cancel").c_str(), WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         218, 62, 76, 28, dialog, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDCANCEL)), instance, nullptr);
     const HFONT font = uiFont ? uiFont : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
     for (HWND control : {label, edit, ok, cancel}) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
@@ -547,7 +615,8 @@ private:
                     result.html = render_markdown_html(request.source, options);
                 }
             } catch (...) {
-                result.html = L"<!doctype html><meta charset=utf-8><style>body{font:16px Segoe UI;padding:32px}</style><p>后台预览生成失败；编辑和保存仍可正常使用。</p>";
+                result.html = L"<!doctype html><meta charset=utf-8><style>body{font:16px Segoe UI;padding:32px}</style><p>" +
+                    i18n::text(L"Preview generation failed in the background. Editing and saving remain available.") + L"</p>";
             }
 
             {
@@ -602,6 +671,7 @@ void AppWindow::unregister_classes(HINSTANCE instance) noexcept {
 
 HWND AppWindow::create(HWND parent, HINSTANCE instance, const std::filesystem::path& path, int) {
     std::wstring error;
+    i18n::initialize(module_path(instance));
     Document document;
     if (!document.load(path, error)) {
         MessageBoxW(parent, error.c_str(), L"EditMdView", MB_OK | MB_ICONERROR);
@@ -662,17 +732,19 @@ bool AppWindow::initialize(HWND window) {
     SetWindowSubclass(status_, status_subclass_proc, 5, reinterpret_cast<DWORD_PTR>(this));
     SetWindowSubclass(splitDivider_, divider_subclass_proc, 6, reinterpret_cast<DWORD_PTR>(this));
 
-    make_button(toolbar_, instance_, kIdEdit, L"编辑", BS_AUTORADIOBUTTON | BS_PUSHLIKE | WS_GROUP);
-    make_button(toolbar_, instance_, kIdSplit, L"分栏", BS_AUTORADIOBUTTON | BS_PUSHLIKE);
-    make_button(toolbar_, instance_, kIdPreview, L"预览", BS_AUTORADIOBUTTON | BS_PUSHLIKE);
-    make_button(toolbar_, instance_, kIdSave, L"保存");
-    make_button(toolbar_, instance_, kIdTheme, dark_ ? L"浅色" : L"深色");
-    make_button(toolbar_, instance_, kIdMore, L"更多");
+    make_button(toolbar_, instance_, kIdEdit, i18n::text(L"Edit").c_str(), BS_AUTORADIOBUTTON | BS_PUSHLIKE | WS_GROUP);
+    make_button(toolbar_, instance_, kIdSplit, i18n::text(L"Split").c_str(), BS_AUTORADIOBUTTON | BS_PUSHLIKE);
+    make_button(toolbar_, instance_, kIdPreview, i18n::text(L"Preview").c_str(), BS_AUTORADIOBUTTON | BS_PUSHLIKE);
+    make_button(toolbar_, instance_, kIdSave, i18n::text(L"Save").c_str());
+    make_button(toolbar_, instance_, kIdTheme,
+        dark_ ? i18n::text(L"Light").c_str() : i18n::text(L"Dark").c_str());
+    make_button(toolbar_, instance_, kIdLanguage, i18n::text(L"Language").c_str());
+    make_button(toolbar_, instance_, kIdMore, i18n::text(L"More").c_str());
     findBox_ = CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
         CBS_DROPDOWN | CBS_AUTOHSCROLL, 0, 0, 180, 220, toolbar_,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(kIdFindBox)), instance_, nullptr);
-    make_button(toolbar_, instance_, kIdFindNext, L"查找");
-    make_button(toolbar_, instance_, kIdReplace, L"替换");
+    make_button(toolbar_, instance_, kIdFindNext, i18n::text(L"Find").c_str());
+    make_button(toolbar_, instance_, kIdReplace, i18n::text(L"Replace").c_str());
     findEdit_ = FindWindowExW(findBox_, nullptr, L"Edit", nullptr);
     if (findEdit_) SetWindowSubclass(findEdit_, find_subclass_proc, 2, reinterpret_cast<DWORD_PTR>(this));
 
@@ -705,7 +777,8 @@ bool AppWindow::initialize(HWND window) {
     if (document_.supports_preview()) {
         preview_.create(window_, instance_, error);
         preview_.set_find_shortcuts(window_, kMessageFocusFind, kMessageFindNext,
-            kMessagePreviewFindResult, kMessageToggleMode, kMessageReloadConfiguration);
+            kMessagePreviewFindResult, kMessageToggleMode, kMessageReloadConfiguration,
+            kMessageSave, kMessageSaveAs);
         preview_.set_source_navigation(window_, kMessagePreviewLocate);
     }
     ViewMode initialMode = document_.supports_preview()
@@ -717,7 +790,10 @@ bool AppWindow::initialize(HWND window) {
         refresh_preview(restored ? std::optional<double>(restored->previewScrollFraction)
                                  : std::optional<double>(0.0));
     }
-    if (restored) editor_.restore_view_state(restored->editor);
+    if (restored) {
+        pendingEditorViewState_ = restored->editor;
+        PostMessageW(window_, kMessageRestoreEditorView, 0, 0);
+    }
     restoringDocumentState_ = false;
     update_status();
     SetTimer(window_, kExternalChangeTimer, kExternalChangeDelayMs, nullptr);
@@ -849,7 +925,7 @@ LRESULT CALLBACK AppWindow::editor_subclass_proc(HWND window, UINT message, WPAR
             }
         }
         if (control && wParam == 'S') {
-            PostMessageW(self->window_, kMessageSave, 0, 0);
+            PostMessageW(self->window_, shift ? kMessageSaveAs : kMessageSave, 0, 0);
             return 0;
         }
         if (control && shift && wParam == 'R') {
@@ -1119,7 +1195,8 @@ LRESULT CALLBACK AppWindow::status_subclass_proc(HWND window, UINT message, WPAR
         if (!self || part_at(point) != kStatusState) return false;
         RECT bounds{};
         if (!SendMessageW(window, SB_GETRECT, kStatusState, reinterpret_cast<LPARAM>(&bounds))) return false;
-        const std::wstring label = self->editor_.wrap_enabled() ? L"自动换行" : L"不换行";
+        const std::wstring label = self->editor_.wrap_enabled() ?
+            i18n::text(L"Word wrap") : i18n::text(L"No wrap");
         HDC device = GetDC(window);
         if (!device) return false;
         const HFONT font = reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0));
@@ -1240,6 +1317,7 @@ LRESULT AppWindow::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_SIZE:
         layout();
+        restore_pending_editor_view_state();
         return 0;
     case WM_ERASEBKGND:
         return 1;
@@ -1324,10 +1402,16 @@ LRESULT AppWindow::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
         case kIdPreview: set_mode(ViewMode::Preview); return 0;
         case kIdSave: save(); return 0;
         case kIdTheme: toggle_theme(); return 0;
+        case kIdLanguage: {
+            RECT button{};
+            GetWindowRect(GetDlgItem(toolbar_, kIdLanguage), &button);
+            show_language_menu(POINT{button.left, button.bottom});
+            return 0;
+        }
         case kIdMore: {
             RECT button{};
             GetWindowRect(GetDlgItem(toolbar_, kIdMore), &button);
-            show_editor_menu(POINT{button.left, button.bottom});
+            show_editor_menu(POINT{button.left, button.bottom}, false);
             return 0;
         }
         case kIdFindNext: perform_find(false, false); return 0;
@@ -1337,6 +1421,9 @@ LRESULT AppWindow::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
         break;
     case kMessageSave:
         save();
+        return 0;
+    case kMessageSaveAs:
+        save_as();
         return 0;
     case kMessageToggleMode:
         if (document_.supports_preview()) {
@@ -1380,8 +1467,8 @@ LRESULT AppWindow::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
         return 0;
     case kMessagePreviewFindResult:
         previewFindStatus_ = lParam > 0
-            ? L"预览查找 " + std::to_wstring(wParam) + L"/" + std::to_wstring(lParam)
-            : L"预览未找到";
+            ? i18n::text(L"Preview match") + L" " + std::to_wstring(wParam) + L"/" + std::to_wstring(lParam)
+            : i18n::text(L"No preview match");
         update_status();
         return 0;
     case kMessagePreviewReady:
@@ -1397,10 +1484,13 @@ LRESULT AppWindow::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
     case kMessageReloadConfiguration:
         reload_configuration(false);
         return 0;
+    case kMessageRestoreEditorView:
+        restore_pending_editor_view_state();
+        return 0;
     case kMessageEditorMenu: {
         POINT point{};
         GetCursorPos(&point);
-        show_editor_menu(point);
+        show_editor_menu(point, true);
         return 0;
     }
     case kMessageZoom:
@@ -1475,22 +1565,53 @@ void AppWindow::layout() {
     const std::array<int, 5> statusParts = {caretEnd, languageEnd, encodingEnd, eolEnd, -1};
     SendMessageW(status_, SB_SETPARTS, statusParts.size(), reinterpret_cast<LPARAM>(statusParts.data()));
 
-    const std::array<int, 6> ids = {kIdEdit, kIdSplit, kIdPreview, kIdSave, kIdTheme, kIdMore};
+    const std::array<int, 7> ids = {
+        kIdEdit, kIdSplit, kIdPreview, kIdSave, kIdTheme, kIdLanguage, kIdMore};
+    HDC toolbarDevice = GetDC(toolbar_);
+    HFONT oldFont = nullptr;
+    if (toolbarDevice) {
+        HFONT font = reinterpret_cast<HFONT>(SendMessageW(toolbar_, WM_GETFONT, 0, 0));
+        if (!font) font = uiFont_ ? uiFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+        oldFont = static_cast<HFONT>(SelectObject(toolbarDevice, font));
+    }
+    const auto buttonWidth = [&](HWND button) {
+        wchar_t label[256]{};
+        GetWindowTextW(button, label, static_cast<int>(std::size(label)));
+        SIZE size{};
+        if (!toolbarDevice || !GetTextExtentPoint32W(toolbarDevice, label,
+                static_cast<int>(wcslen(label)), &size)) {
+            size.cx = 34;
+        }
+        return std::max(52, static_cast<int>(size.cx) + 24);
+    };
+
     int x = 6;
     for (int id : ids) {
         HWND button = GetDlgItem(toolbar_, id);
-        MoveWindow(button, x, 5, 58, 28, TRUE);
-        x += 62;
+        const int width = buttonWidth(button);
+        MoveWindow(button, x, 5, width, 28, TRUE);
+        x += width + 4;
     }
+    const HWND findButton = GetDlgItem(toolbar_, kIdFindNext);
+    const HWND replaceButton = GetDlgItem(toolbar_, kIdReplace);
+    const int findButtonWidth = buttonWidth(findButton);
+    const int replaceButtonWidth = buttonWidth(replaceButton);
+    if (toolbarDevice) {
+        if (oldFont) SelectObject(toolbarDevice, oldFont);
+        ReleaseDC(toolbar_, toolbarDevice);
+    }
+
     const int desiredFindWidth = std::clamp(clientWidth / 5, 120, 240);
-    constexpr int findActionsWidth = 130;
+    const int findActionsWidth = 5 + findButtonWidth + 4 + replaceButtonWidth;
     const int leftLimit = x + 8;
-    const int findWidth = std::max(60,
-        std::min(desiredFindWidth, clientWidth - leftLimit - findActionsWidth));
-    const int findX = std::max(leftLimit, clientWidth - findWidth - findActionsWidth);
+    const int availableFindWidth = clientWidth - leftLimit - findActionsWidth - 6;
+    const int findWidth = std::max(60, std::min(desiredFindWidth, availableFindWidth));
+    const int findX = std::max(leftLimit, clientWidth - findWidth - findActionsWidth - 6);
     MoveWindow(findBox_, findX, 6, findWidth, 220, TRUE);
-    MoveWindow(GetDlgItem(toolbar_, kIdFindNext), findX + findWidth + 5, 5, 58, 28, TRUE);
-    MoveWindow(GetDlgItem(toolbar_, kIdReplace), findX + findWidth + 67, 5, 58, 28, TRUE);
+    const int findButtonX = findX + findWidth + 5;
+    MoveWindow(findButton, findButtonX, 5, findButtonWidth, 28, TRUE);
+    MoveWindow(replaceButton, findButtonX + findButtonWidth + 4, 5,
+        replaceButtonWidth, 28, TRUE);
 
     RECT content{0, toolbarHeight, clientWidth, std::max(toolbarHeight, clientHeight - statusHeight)};
     if (mode_ == ViewMode::Split && document_.supports_preview()) {
@@ -1509,6 +1630,17 @@ void AppWindow::layout() {
         preview_.resize(content);
         ShowWindow(splitDivider_, SW_HIDE);
     }
+}
+
+void AppWindow::restore_pending_editor_view_state() {
+    if (!pendingEditorViewState_ || !editor_.handle()) return;
+    const EditorViewState state = *pendingEditorViewState_;
+    pendingEditorViewState_.reset();
+    const bool wasRestoring = restoringDocumentState_;
+    restoringDocumentState_ = true;
+    editor_.restore_view_state(state);
+    restoringDocumentState_ = wasRestoring;
+    update_status();
 }
 
 void AppWindow::set_mode(ViewMode mode) {
@@ -1546,7 +1678,8 @@ void AppWindow::refresh_preview(std::optional<double> initialScrollFraction) {
     if (source.size() > maximumPreviewSize) {
         if (previewRenderWorker_) previewRenderWorker_->cancel();
         previewRendering_ = false;
-        preview_.set_content(L"<!doctype html><meta charset=utf-8><style>body{font:16px Segoe UI;padding:32px}</style><p>文档较大，实时预览已暂停；编辑和保存仍可正常使用。</p>",
+        preview_.set_content(L"<!doctype html><meta charset=utf-8><style>body{font:16px Segoe UI;padding:32px}</style><p>" +
+            i18n::text(L"Live preview is paused for this large document. Editing and saving remain available.") + L"</p>",
             document_.path().parent_path(), initialScrollFraction);
     } else if (source.size() >= backgroundThreshold && previewRenderWorker_) {
         PreviewRenderWorker::Request request;
@@ -1613,8 +1746,8 @@ void AppWindow::check_external_change() {
     if (editor_.modified()) {
         update_status();
         MessageBoxW(window_,
-            L"当前文件已被其他程序修改。\n\n编辑器中的未保存内容不会被覆盖；保存前请先处理外部版本。",
-            L"检测到外部修改", MB_OK | MB_ICONWARNING);
+            i18n::text(L"The file was modified by another program.\n\nUnsaved editor content was not overwritten. Resolve the external version before saving.").c_str(),
+            i18n::text(L"External Change Detected").c_str(), MB_OK | MB_ICONWARNING);
         return;
     }
 
@@ -1633,6 +1766,7 @@ void AppWindow::check_configuration_change() {
 
 void AppWindow::reload_configuration(bool automatic, bool announce) {
     if (!editor_.handle() || document_.path().empty()) return;
+    i18n::initialize(module_path(instance_));
     const EditorViewState view = editor_.view_state();
     auto properties = SciteProperties::load_for_document(
         module_path(instance_), document_.path(), dark_);
@@ -1641,7 +1775,8 @@ void AppWindow::reload_configuration(bool automatic, bool announce) {
     editor_.reload_configuration(document_.path(), dark_);
     editor_.restore_view_state(view);
     if (announce) {
-        configurationStatus_ = automatic ? L"配置已自动重新加载" : L"配置已重新加载";
+        configurationStatus_ = automatic ? i18n::text(L"Configuration reloaded automatically") :
+            i18n::text(L"Configuration reloaded");
         KillTimer(window_, kConfigurationStatusTimer);
         SetTimer(window_, kConfigurationStatusTimer, kConfigurationStatusDelayMs, nullptr);
     }
@@ -1659,13 +1794,14 @@ void AppWindow::show_status_menu(int part) {
         AppendMenuW(menu, MF_STRING | (current == L"LF" ? MF_CHECKED : 0), kMenuEolLf,
             L"Unix / Linux (LF)");
         AppendMenuW(menu, MF_STRING | (current == L"CR" ? MF_CHECKED : 0), kMenuEolCr,
-            L"旧式 Mac (CR)");
+            i18n::text(L"Classic Mac (CR)").c_str());
     } else if (part == kStatusLanguage) {
         for (std::size_t index = 0; index < kLanguages.size(); ++index) {
             if (index == 2 || index == 12) AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
             const auto [language, name] = kLanguages[index];
             const UINT flags = MF_STRING | (language == editor_.language() ? MF_CHECKED : 0);
-            AppendMenuW(menu, flags, kMenuLanguageBase + static_cast<UINT>(index), name);
+            const std::wstring localizedName = i18n::text(name);
+            AppendMenuW(menu, flags, kMenuLanguageBase + static_cast<UINT>(index), localizedName.c_str());
         }
     } else {
         DestroyMenu(menu);
@@ -1703,19 +1839,21 @@ void AppWindow::set_language(SyntaxLanguage language) {
 
 void AppWindow::update_status() {
     if (!status_) return;
-    const std::wstring caret = L"行 " + std::to_wstring(editor_.current_line()) + L"，列 " +
+    const std::wstring caret = i18n::text(L"Line") + L" " +
+        std::to_wstring(editor_.current_line()) + L", " + i18n::text(L"Column") + L" " +
         std::to_wstring(editor_.current_column());
-    const std::wstring language = L"语言: " + editor_.language_name() + L"  ▾";
-    const std::wstring encoding = L"编码: " + std::wstring(document_.encoding_name());
-    const std::wstring eol = L"换行符: " + editor_.eol_name() + L"  ▾";
-    std::wstring state = editor_.wrap_enabled() ? L"自动换行" : L"不换行";
+    const std::wstring language = i18n::text(L"Language:") + L" " + editor_.language_name() + L"  ▾";
+    const std::wstring encoding = i18n::text(L"Encoding:") + L" " + document_.encoding_name();
+    const std::wstring eol = i18n::text(L"EOL:") + L" " + editor_.eol_name() + L"  ▾";
+    std::wstring state = editor_.wrap_enabled() ? i18n::text(L"Word wrap") : i18n::text(L"No wrap");
     if (editor_.zoom() != 0) {
-        state += L"    缩放 " + std::wstring(editor_.zoom() > 0 ? L"+" : L"") + std::to_wstring(editor_.zoom());
+        state += L"    " + i18n::text(L"Zoom") + L" " +
+            std::wstring(editor_.zoom() > 0 ? L"+" : L"") + std::to_wstring(editor_.zoom());
     }
-    if (editor_.modified()) state += L"    ● 已修改";
-    if (recoveryWriteFailed_) state += L"    ⚠ 无法保存恢复草稿";
-    if (externalChangeNotified_) state += L"    ⚠ 外部文件已更改";
-    if (previewRendering_) state += L"    正在后台生成预览…";
+    if (editor_.modified()) state += L"    ● " + i18n::text(L"Modified");
+    if (recoveryWriteFailed_) state += L"    ⚠ " + i18n::text(L"Unable to save recovery draft");
+    if (externalChangeNotified_) state += L"    ⚠ " + i18n::text(L"File changed externally");
+    if (previewRendering_) state += L"    " + i18n::text(L"Rendering preview…");
     if (!configurationStatus_.empty()) state += L"    " + configurationStatus_;
     if (!previewFindStatus_.empty() && mode_ != ViewMode::Edit) state += L"    " + previewFindStatus_;
     SendMessageW(status_, SB_SETTEXTW, kStatusCaret, reinterpret_cast<LPARAM>(caret.c_str()));
@@ -1725,11 +1863,11 @@ void AppWindow::update_status() {
     SendMessageW(status_, SB_SETTEXTW, kStatusEol | SBT_POPOUT, reinterpret_cast<LPARAM>(eol.c_str()));
     SendMessageW(status_, SB_SETTEXTW, kStatusState, reinterpret_cast<LPARAM>(state.c_str()));
     SendMessageW(status_, SB_SETTIPTEXTW, kStatusLanguage,
-        reinterpret_cast<LPARAM>(L"单击切换当前语法高亮语言"));
+        reinterpret_cast<LPARAM>(i18n::text(L"Click to change the syntax highlighting language").c_str()));
     SendMessageW(status_, SB_SETTIPTEXTW, kStatusEol,
-        reinterpret_cast<LPARAM>(L"单击转换整篇文档的换行符"));
+        reinterpret_cast<LPARAM>(i18n::text(L"Click to convert line endings for the whole document").c_str()));
     SendMessageW(status_, SB_SETTIPTEXTW, kStatusState,
-        reinterpret_cast<LPARAM>(L"单击自动换行状态可切换换行模式"));
+        reinterpret_cast<LPARAM>(i18n::text(L"Click the wrap indicator to toggle word wrap").c_str()));
 }
 
 void AppWindow::save() {
@@ -1741,7 +1879,7 @@ void AppWindow::save() {
                 const std::filesystem::path& targetFile, std::wstring& saveError) {
                 return run_elevated_save_helper(window_, instance_, stagedFile, targetFile, saveError);
             })) {
-        MessageBoxW(window_, error.c_str(), L"保存失败", MB_OK | MB_ICONERROR);
+        MessageBoxW(window_, error.c_str(), i18n::text(L"Save Failed").c_str(), MB_OK | MB_ICONERROR);
         return;
     }
     editor_.mark_saved();
@@ -1753,9 +1891,67 @@ void AppWindow::save() {
     update_status();
 }
 
+void AppWindow::save_as() {
+    std::filesystem::path targetPath;
+    std::wstring error;
+    if (!prompt_for_save_path(window_, document_.path(), targetPath, error)) {
+        if (!error.empty()) MessageBoxW(window_, error.c_str(), i18n::text(L"Save As Failed").c_str(), MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    const std::filesystem::path originalPath = document_.path();
+    const EditorViewState view = editor_.view_state();
+    const double previewScroll = preview_.scroll_fraction();
+    remember_document_view_state();
+    const std::string content = editor_.text_for_save();
+    if (!document_.save_as(targetPath, content, error,
+            [this](const std::filesystem::path& stagedFile,
+                const std::filesystem::path& targetFile, std::wstring& saveError) {
+                return run_elevated_save_helper(window_, instance_, stagedFile, targetFile, saveError);
+            })) {
+        MessageBoxW(window_, error.c_str(), i18n::text(L"Save As Failed").c_str(), MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    editor_.mark_saved();
+    KillTimer(window_, kRecoveryTimer);
+    recoverySnapshotContent_.clear();
+    recoveryWriteFailed_ = false;
+    remove_recovery_snapshot(runtimeDataDirectory_, originalPath);
+    remove_recovery_snapshot(runtimeDataDirectory_, document_.path());
+    externalChangeNotified_ = false;
+
+    auto properties = SciteProperties::load_for_document(
+        module_path(instance_), document_.path(), dark_);
+    configurationSignature_ = properties.configuration_signature();
+    editor_.set_properties(std::move(properties));
+    editor_.reload_configuration(document_.path(), dark_);
+
+    std::wstring previewError;
+    if (document_.supports_preview() && !preview_.handle()) {
+        preview_.create(window_, instance_, previewError);
+        preview_.set_find_shortcuts(window_, kMessageFocusFind, kMessageFindNext,
+            kMessagePreviewFindResult, kMessageToggleMode, kMessageReloadConfiguration,
+            kMessageSave, kMessageSaveAs);
+        preview_.set_source_navigation(window_, kMessagePreviewLocate);
+    }
+    const ViewMode nextMode = document_.supports_preview() ? mode_ : ViewMode::Edit;
+    set_mode(nextMode);
+    editor_.restore_view_state(view);
+    if (document_.supports_preview()) refresh_preview(previewScroll);
+
+    configurationStatus_ = i18n::text(L"Saved as") + L" \"" +
+        file_title(document_.path()) + L"\"";
+    KillTimer(window_, kConfigurationStatusTimer);
+    SetTimer(window_, kConfigurationStatusTimer, kConfigurationStatusDelayMs, nullptr);
+    remember_document_view_state();
+    update_status();
+}
+
 bool AppWindow::confirm_discard_or_save() {
     if (!editor_.modified()) return true;
-    const std::wstring prompt = L"“" + file_title(document_.path()) + L"”有未保存的修改。\n\n是否保存？";
+    const std::wstring prompt = L"\"" + file_title(document_.path()) + L"\" " +
+        i18n::text(L"has unsaved changes.\n\nSave them?");
     const int answer = MessageBoxW(window_, prompt.c_str(), L"EditMdView", MB_YESNOCANCEL | MB_ICONWARNING);
     if (answer == IDCANCEL) return false;
     if (answer == IDYES) {
@@ -1772,8 +1968,58 @@ void AppWindow::toggle_theme() {
     configurationSignature_ = properties.configuration_signature();
     editor_.set_properties(std::move(properties));
     editor_.set_dark(dark_);
-    SetWindowTextW(GetDlgItem(toolbar_, kIdTheme), dark_ ? L"浅色" : L"深色");
+    SetWindowTextW(GetDlgItem(toolbar_, kIdTheme),
+        dark_ ? i18n::text(L"Light").c_str() : i18n::text(L"Dark").c_str());
     refresh_preview();
+}
+
+void AppWindow::show_language_menu(POINT screenPoint) {
+    const auto module = module_path(instance_);
+    const auto languages = i18n::available_languages(module);
+    HMENU menu = CreatePopupMenu();
+    if (!menu) return;
+    const std::wstring selected = lower_wide(i18n::selected_language());
+    for (std::size_t index = 0; index < languages.size(); ++index) {
+        const std::wstring code = languages[index];
+        std::wstring label = code;
+        if (lower_wide(code) == L"auto") label = i18n::text(L"Automatic (Windows)");
+        else if (lower_wide(code) == L"zh-cn") label = i18n::text(L"Simplified Chinese");
+        else if (lower_wide(code) == L"en-us") label = L"English";
+        const UINT flags = MF_STRING |
+            (lower_wide(code) == selected ? static_cast<UINT>(MF_CHECKED) : 0U);
+        AppendMenuW(menu, flags, kMenuUiLanguageBase + static_cast<UINT>(index), label.c_str());
+    }
+    const int command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+        screenPoint.x, screenPoint.y, 0, window_, nullptr);
+    DestroyMenu(menu);
+    if (command < kMenuUiLanguageBase ||
+        command >= kMenuUiLanguageBase + static_cast<int>(languages.size())) return;
+    std::wstring error;
+    if (!i18n::select_language(module,
+            languages[static_cast<std::size_t>(command - kMenuUiLanguageBase)], error)) {
+        MessageBoxW(window_, error.c_str(), L"EditMdView", MB_OK | MB_ICONERROR);
+        return;
+    }
+    apply_ui_language();
+}
+
+void AppWindow::apply_ui_language() {
+    SetWindowTextW(GetDlgItem(toolbar_, kIdEdit), i18n::text(L"Edit").c_str());
+    SetWindowTextW(GetDlgItem(toolbar_, kIdSplit), i18n::text(L"Split").c_str());
+    SetWindowTextW(GetDlgItem(toolbar_, kIdPreview), i18n::text(L"Preview").c_str());
+    SetWindowTextW(GetDlgItem(toolbar_, kIdSave), i18n::text(L"Save").c_str());
+    SetWindowTextW(GetDlgItem(toolbar_, kIdTheme),
+        dark_ ? i18n::text(L"Light").c_str() : i18n::text(L"Dark").c_str());
+    SetWindowTextW(GetDlgItem(toolbar_, kIdLanguage), i18n::text(L"Language").c_str());
+    SetWindowTextW(GetDlgItem(toolbar_, kIdMore), i18n::text(L"More").c_str());
+    SetWindowTextW(GetDlgItem(toolbar_, kIdFindNext), i18n::text(L"Find").c_str());
+    SetWindowTextW(GetDlgItem(toolbar_, kIdReplace), i18n::text(L"Replace").c_str());
+    if (replaceDialog_ && IsWindow(replaceDialog_)) DestroyWindow(replaceDialog_);
+    hide_slash_popup();
+    reload_configuration(false, false);
+    if (document_.supports_preview()) refresh_preview(preview_.scroll_fraction());
+    layout();
+    update_status();
 }
 
 bool AppWindow::prefill_find_from_selection() {
@@ -1805,40 +2051,55 @@ void AppWindow::perform_find(bool backwards, bool fromStart) {
     }
 }
 
-void AppWindow::show_editor_menu(POINT screenPoint) {
+void AppWindow::show_editor_menu(POINT screenPoint, bool contextMenu) {
     HMENU menu = CreatePopupMenu();
     if (!menu) return;
-    AppendMenuW(menu, MF_STRING, kMenuUndo, L"撤销\tCtrl+Z");
-    AppendMenuW(menu, MF_STRING, kMenuRedo, L"重做\tCtrl+Y");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kMenuCut, L"剪切\tCtrl+X");
-    AppendMenuW(menu, MF_STRING, kMenuCopy, L"复制\tCtrl+C");
-    AppendMenuW(menu, MF_STRING, kMenuPaste, L"粘贴\tCtrl+V");
-    AppendMenuW(menu, MF_STRING, kMenuDelete, L"删除");
-    AppendMenuW(menu, MF_STRING, kMenuSelectAll, L"全选\tCtrl+A");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kMenuReplace, L"替换…\tCtrl+H");
-    AppendMenuW(menu, MF_STRING, kMenuGoToLine, L"跳转到行…\tCtrl+G");
-    AppendMenuW(menu, MF_STRING | (editor_.wrap_enabled() ? MF_CHECKED : 0), kMenuWrap, L"自动换行\tAlt+Z");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kMenuZoomIn, L"放大\tCtrl++");
-    AppendMenuW(menu, MF_STRING, kMenuZoomOut, L"缩小\tCtrl+-");
-    AppendMenuW(menu, MF_STRING, kMenuZoomReset, L"重置缩放\tCtrl+0");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, kMenuReloadConfiguration, L"重新加载配置\tCtrl+Shift+R");
 
-    EnableMenuItem(menu, kMenuUndo, MF_BYCOMMAND | (editor_.can_undo() ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(menu, kMenuRedo, MF_BYCOMMAND | (editor_.can_redo() ? MF_ENABLED : MF_GRAYED));
-    const bool selection = editor_.has_selection();
-    EnableMenuItem(menu, kMenuCut, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(menu, kMenuCopy, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(menu, kMenuDelete, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
-    EnableMenuItem(menu, kMenuPaste, MF_BYCOMMAND | (editor_.can_paste() ? MF_ENABLED : MF_GRAYED));
+    if (contextMenu) {
+        // Keep the editor context menu focused on frequent editing actions.
+        AppendMenuW(menu, MF_STRING, kMenuUndo, i18n::text(L"Undo\tCtrl+Z").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuRedo, i18n::text(L"Redo\tCtrl+Y").c_str());
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kMenuCut, i18n::text(L"Cut\tCtrl+X").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuCopy, i18n::text(L"Copy\tCtrl+C").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuPaste, i18n::text(L"Paste\tCtrl+V").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuDelete, i18n::text(L"Delete").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuSelectAll, i18n::text(L"Select All\tCtrl+A").c_str());
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kMenuReplace, i18n::text(L"Replace…\tCtrl+H").c_str());
+    } else {
+        // Less frequent document and view commands live under More.
+        AppendMenuW(menu, MF_STRING, kMenuSaveAs, i18n::text(L"Save As…\tCtrl+Shift+S").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuGoToLine, i18n::text(L"Go to Line…\tCtrl+G").c_str());
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING | (editor_.wrap_enabled() ? MF_CHECKED : 0),
+            kMenuWrap, i18n::text(L"Word Wrap\tAlt+Z").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuZoomIn, i18n::text(L"Zoom In\tCtrl++").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuZoomOut, i18n::text(L"Zoom Out\tCtrl+-").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuZoomReset, i18n::text(L"Reset Zoom\tCtrl+0").c_str());
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kMenuReloadConfiguration,
+            i18n::text(L"Reload Configuration\tCtrl+Shift+R").c_str());
+    }
+
+    if (contextMenu) {
+        EnableMenuItem(menu, kMenuUndo,
+            MF_BYCOMMAND | (editor_.can_undo() ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, kMenuRedo,
+            MF_BYCOMMAND | (editor_.can_redo() ? MF_ENABLED : MF_GRAYED));
+        const bool selection = editor_.has_selection();
+        EnableMenuItem(menu, kMenuCut, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, kMenuCopy, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, kMenuDelete, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, kMenuPaste,
+            MF_BYCOMMAND | (editor_.can_paste() ? MF_ENABLED : MF_GRAYED));
+    }
 
     const int command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
         screenPoint.x, screenPoint.y, 0, window_, nullptr);
     DestroyMenu(menu);
     switch (command) {
+    case kMenuSaveAs: save_as(); break;
     case kMenuUndo: editor_.undo(); break;
     case kMenuRedo: editor_.redo(); break;
     case kMenuCut: editor_.cut(); break;
@@ -1904,7 +2165,7 @@ void AppWindow::show_replace_dialog() {
     const int x = ownerBounds.left + ((ownerBounds.right - ownerBounds.left) - width) / 2;
     const int y = ownerBounds.top + ((ownerBounds.bottom - ownerBounds.top) - height) / 2;
     replaceDialog_ = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT, kReplaceWindowClass,
-        L"查找和替换", WS_POPUP | WS_CAPTION | WS_SYSMENU, x, y, width, height,
+        i18n::text(L"Find and Replace").c_str(), WS_POPUP | WS_CAPTION | WS_SYSMENU, x, y, width, height,
         owner, nullptr, instance_, this);
     if (!replaceDialog_) {
         MessageBeep(MB_ICONERROR);
@@ -1921,25 +2182,25 @@ void AppWindow::show_replace_dialog() {
         return control;
     };
 
-    make_control(0, L"STATIC", L"查找内容：", SS_CENTERIMAGE, 18, 18, 76, 26, 0);
+    make_control(0, L"STATIC", i18n::text(L"Find:").c_str(), SS_CENTERIMAGE, 18, 18, 76, 26, 0);
     replaceFindCombo_ = make_control(0, L"COMBOBOX", L"", WS_TABSTOP | WS_VSCROLL |
         CBS_DROPDOWN | CBS_AUTOHSCROLL, 96, 18, 406, 220, kReplaceFind);
-    make_control(0, L"STATIC", L"替换为：", SS_CENTERIMAGE, 18, 54, 76, 26, 0);
+    make_control(0, L"STATIC", i18n::text(L"Replace with:").c_str(), SS_CENTERIMAGE, 18, 54, 76, 26, 0);
     replaceWithCombo_ = make_control(0, L"COMBOBOX", L"", WS_TABSTOP | WS_VSCROLL |
         CBS_DROPDOWN | CBS_AUTOHSCROLL, 96, 54, 406, 220, kReplaceWith);
-    make_control(0, L"BUTTON", L"区分大小写", WS_TABSTOP | BS_AUTOCHECKBOX,
+    make_control(0, L"BUTTON", i18n::text(L"Match case").c_str(), WS_TABSTOP | BS_AUTOCHECKBOX,
         18, 94, 110, 24, kReplaceMatchCase);
-    make_control(0, L"BUTTON", L"全字匹配", WS_TABSTOP | BS_AUTOCHECKBOX,
+    make_control(0, L"BUTTON", i18n::text(L"Whole word").c_str(), WS_TABSTOP | BS_AUTOCHECKBOX,
         140, 94, 96, 24, kReplaceWholeWord);
-    make_control(0, L"BUTTON", L"向上查找", WS_TABSTOP | BS_AUTOCHECKBOX,
+    make_control(0, L"BUTTON", i18n::text(L"Search up").c_str(), WS_TABSTOP | BS_AUTOCHECKBOX,
         248, 94, 96, 24, kReplaceDirectionUp);
-    make_control(0, L"BUTTON", L"查找下一个", WS_TABSTOP | BS_DEFPUSHBUTTON,
+    make_control(0, L"BUTTON", i18n::text(L"Find Next").c_str(), WS_TABSTOP | BS_DEFPUSHBUTTON,
         18, 132, 108, 30, kReplaceFindNext);
-    make_control(0, L"BUTTON", L"替换", WS_TABSTOP | BS_PUSHBUTTON,
+    make_control(0, L"BUTTON", i18n::text(L"Replace").c_str(), WS_TABSTOP | BS_PUSHBUTTON,
         136, 132, 92, 30, kReplaceOne);
-    make_control(0, L"BUTTON", L"全部替换", WS_TABSTOP | BS_PUSHBUTTON,
+    make_control(0, L"BUTTON", i18n::text(L"Replace All").c_str(), WS_TABSTOP | BS_PUSHBUTTON,
         238, 132, 102, 30, kReplaceAll);
-    make_control(0, L"BUTTON", L"关闭", WS_TABSTOP | BS_PUSHBUTTON,
+    make_control(0, L"BUTTON", i18n::text(L"Close").c_str(), WS_TABSTOP | BS_PUSHBUTTON,
         410, 132, 92, 30, kReplaceClose);
     replaceResult_ = make_control(0, L"STATIC", L"", SS_CENTERIMAGE,
         18, 174, 484, 28, kReplaceResult);
@@ -1972,7 +2233,7 @@ void AppWindow::perform_replace_action(int command) {
     const std::wstring replacement = window_text(replaceWithCombo_);
     if (needle.empty()) {
         MessageBeep(MB_ICONWARNING);
-        if (replaceResult_) SetWindowTextW(replaceResult_, L"请输入查找内容。");
+        if (replaceResult_) SetWindowTextW(replaceResult_, i18n::text(L"Enter text to find.").c_str());
         return;
     }
     SetWindowTextW(findBox_, needle.c_str());
@@ -1990,21 +2251,24 @@ void AppWindow::perform_replace_action(int command) {
     if (command == kReplaceFindNext) {
         if (!editor_.find(utf8Needle, matchCase, wholeWord, backwards, false)) {
             MessageBeep(MB_ICONINFORMATION);
-            if (replaceResult_) SetWindowTextW(replaceResult_, L"未找到匹配内容。");
+            if (replaceResult_) SetWindowTextW(replaceResult_, i18n::text(L"No matches found.").c_str());
         } else if (replaceResult_) {
-            SetWindowTextW(replaceResult_, L"已定位到下一处匹配。");
+            SetWindowTextW(replaceResult_, i18n::text(L"Moved to the next match.").c_str());
         }
     } else if (command == kReplaceOne) {
         const bool replaced = editor_.replace_selection_if_match(
             utf8Needle, utf8Replacement, matchCase, wholeWord);
         const bool found = editor_.find(utf8Needle, matchCase, wholeWord, backwards, false);
         if (!replaced && !found) MessageBeep(MB_ICONINFORMATION);
-        if (replaceResult_) SetWindowTextW(replaceResult_,
-            replaced ? L"已替换当前匹配，并继续查找。" :
-                (found ? L"已定位匹配；再次单击“替换”执行替换。" : L"未找到匹配内容。"));
+        const std::wstring result = replaced
+            ? i18n::text(L"Replaced the current match and continued searching.")
+            : (found ? i18n::text(L"Match selected; click Replace again to replace it.")
+                     : i18n::text(L"No matches found."));
+        if (replaceResult_) SetWindowTextW(replaceResult_, result.c_str());
     } else if (command == kReplaceAll) {
         const int count = editor_.replace_all(utf8Needle, utf8Replacement, matchCase, wholeWord);
-        const std::wstring message = L"已替换 " + std::to_wstring(count) + L" 处。";
+        const std::wstring message = i18n::text(L"Replaced") + L" " +
+            std::to_wstring(count) + L" " + i18n::text(L"occurrence(s).");
         if (replaceResult_) SetWindowTextW(replaceResult_, message.c_str());
     }
     update_status();
@@ -2034,7 +2298,11 @@ void AppWindow::update_slash_popup() {
         searchable += L" ";
         searchable += command.label;
         searchable += L" ";
+        searchable += i18n::text(command.label);
+        searchable += L" ";
         searchable += command.description;
+        searchable += L" ";
+        searchable += i18n::text(command.description);
         searchable += L" ";
         searchable += command.aliases;
         searchable = lower_wide(std::move(searchable));
@@ -2176,13 +2444,13 @@ void AppWindow::show_table_form() {
         if (control) SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
         return control;
     };
-    make_control(L"STATIC", L"行", SS_CENTERIMAGE, 18, 49, 24, 26, 0);
+    make_control(L"STATIC", i18n::text(L"Line").c_str(), SS_CENTERIMAGE, 18, 49, 24, 26, 0);
     slashRowsEdit_ = make_control(L"EDIT", L"3", WS_TABSTOP | ES_NUMBER | ES_CENTER | ES_AUTOHSCROLL,
         43, 49, 50, 26, kSlashRows);
-    make_control(L"STATIC", L"列", SS_CENTERIMAGE, 106, 49, 24, 26, 0);
+    make_control(L"STATIC", i18n::text(L"Column").c_str(), SS_CENTERIMAGE, 106, 49, 24, 26, 0);
     slashColumnsEdit_ = make_control(L"EDIT", L"3", WS_TABSTOP | ES_NUMBER | ES_CENTER | ES_AUTOHSCROLL,
         131, 49, 50, 26, kSlashColumns);
-    slashInsertButton_ = make_control(L"BUTTON", L"插入", WS_TABSTOP | BS_DEFPUSHBUTTON,
+    slashInsertButton_ = make_control(L"BUTTON", i18n::text(L"Insert").c_str(), WS_TABSTOP | BS_DEFPUSHBUTTON,
         194, 47, 72, 30, kSlashInsert);
     for (HWND control : {slashRowsEdit_, slashColumnsEdit_, slashInsertButton_}) {
         if (control) SetWindowSubclass(control, slash_control_subclass_proc, 6,
@@ -2227,10 +2495,10 @@ void AppWindow::paint_slash_popup(HDC device) {
     if (slashTableMode_) {
         SetTextColor(device, foreground);
         RECT title{16, 10, client.right - 12, 36};
-        DrawTextW(device, L"插入表格", -1, &title, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(device, i18n::text(L"Insert Table").c_str(), -1, &title, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         SetTextColor(device, muted);
         RECT description{16, 86, client.right - 12, 112};
-        DrawTextW(device, L"行数包含表头；范围：行 2–20，列 1–20", -1, &description,
+        DrawTextW(device, i18n::text(L"Rows include the header; range: 2–20 rows, 1–20 columns").c_str(), -1, &description,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         return;
     }
@@ -2262,10 +2530,13 @@ void AppWindow::paint_slash_popup(HDC device) {
         DrawTextW(device, command.glyph, -1, &icon, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         SetTextColor(device, foreground);
         RECT label{52, item.top + 6, client.right - 16, item.top + 27};
-        DrawTextW(device, command.label, -1, &label, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+        const std::wstring localizedLabel = i18n::text(command.label);
+        DrawTextW(device, localizedLabel.c_str(), -1, &label,
+            DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         SetTextColor(device, muted);
         RECT description{52, item.top + 27, client.right - 16, item.bottom - 4};
-        DrawTextW(device, command.description, -1, &description,
+        const std::wstring localizedDescription = i18n::text(command.description);
+        DrawTextW(device, localizedDescription.c_str(), -1, &description,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
     }
     if (static_cast<int>(slashVisibleCommands_.size()) > kSlashMaxVisible) {
@@ -2421,7 +2692,7 @@ void AppWindow::save_search_history() {
         if (!historyWriteWarned_) {
             historyWriteWarned_ = true;
             MessageBoxW(window_,
-                L"无法将查找历史写入插件目录。\n\n历史在本次窗口中仍可使用；如需长期保存，请确保插件目录可写。",
+                i18n::text(L"Unable to write search history to the plugin folder.\n\nHistory remains available in this window. Make the plugin folder writable to keep it permanently.").c_str(),
                 L"EditMdView", MB_OK | MB_ICONWARNING);
         }
     }
@@ -2450,6 +2721,7 @@ void AppWindow::remember_document_view_state() {
     persisted.anchor = state.editor.anchor;
     persisted.caret = state.editor.caret;
     persisted.firstVisibleLine = state.editor.firstVisibleLine;
+    persisted.topVisiblePosition = state.editor.topVisiblePosition;
     persisted.horizontalOffset = state.editor.horizontalOffset;
     persisted.previewScrollFraction = state.previewScrollFraction;
     persisted.splitRatio = state.splitRatio;
@@ -2476,6 +2748,7 @@ std::optional<DocumentViewState> AppWindow::stored_document_view_state(
     state.editor.anchor = persisted->anchor;
     state.editor.caret = persisted->caret;
     state.editor.firstVisibleLine = persisted->firstVisibleLine;
+    state.editor.topVisiblePosition = persisted->topVisiblePosition;
     state.editor.horizontalOffset = persisted->horizontalOffset;
     state.previewScrollFraction = persisted->previewScrollFraction;
     state.splitRatio = persisted->splitRatio;
@@ -2493,9 +2766,11 @@ bool AppWindow::offer_recovery_snapshot() {
         remove_recovery_snapshot(runtimeDataDirectory_, document_.path());
         return false;
     }
-    const std::wstring prompt = L"检测到“" + file_title(document_.path()) +
-        L"”上次未保存的编辑内容。\n\n是否恢复？选择“否”将删除该恢复草稿。";
-    const int answer = MessageBoxW(window_, prompt.c_str(), L"恢复未保存内容",
+    const std::wstring prompt = i18n::text(L"Unsaved recovery draft detected:") + L" " +
+        file_title(document_.path()) + L"\n\n" +
+        i18n::text(L"Restore it? Choosing No deletes the recovery draft.");
+    const int answer = MessageBoxW(window_, prompt.c_str(),
+        i18n::text(L"Recover Unsaved Content").c_str(),
         MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON1);
     if (answer != IDYES) {
         remove_recovery_snapshot(runtimeDataDirectory_, document_.path());
@@ -2567,7 +2842,8 @@ bool AppWindow::load_file(const std::filesystem::path& path) {
     if (document_.supports_preview() && !preview_.handle()) {
         preview_.create(window_, instance_, error);
         preview_.set_find_shortcuts(window_, kMessageFocusFind, kMessageFindNext,
-            kMessagePreviewFindResult, kMessageToggleMode, kMessageReloadConfiguration);
+            kMessagePreviewFindResult, kMessageToggleMode, kMessageReloadConfiguration,
+            kMessageSave, kMessageSaveAs);
         preview_.set_source_navigation(window_, kMessagePreviewLocate);
     }
     set_mode(nextMode);

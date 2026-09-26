@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(EditMdView VERSION 0.5.9 LANGUAGES C CXX RC)
+project(EditMdView VERSION 0.5.10 LANGUAGES C CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "EditMdView is a Windows-only Total Commander WLX plugin")
@@ -98,6 +98,7 @@ add_library(editmdview SHARED
     src/document.cpp
     src/editor.cpp
     src/html_preview.cpp
+    src/i18n.cpp
     src/markdown.cpp
     src/plugin.cpp
     src/preview.cpp
@@ -123,6 +124,11 @@ set_target_properties(editmdview PROPERTIES
     PREFIX ""
     SUFFIX "${EDITMDVIEW_WLX_SUFFIX}"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+add_custom_command(TARGET editmdview POST_BUILD
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${CMAKE_SOURCE_DIR}/language.ini" "$<TARGET_FILE_DIR:editmdview>/language.ini"
+    COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${CMAKE_SOURCE_DIR}/lang" "$<TARGET_FILE_DIR:editmdview>/lang")
 
 add_executable(editmdview_save_helper WIN32
     src/save_helper.cpp
@@ -154,7 +160,7 @@ add_custom_command(TARGET wlx_harness POST_BUILD
 
 include(CTest)
 if(BUILD_TESTING)
-    add_executable(core_tests tests/core_tests.cpp src/document.cpp src/html_preview.cpp src/markdown.cpp
+    add_executable(core_tests tests/core_tests.cpp src/document.cpp src/html_preview.cpp src/i18n.cpp src/markdown.cpp
         src/scite_properties.cpp src/session_state.cpp src/text_detection.cpp)
     target_include_directories(core_tests PRIVATE src)
     target_compile_definitions(core_tests PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN
@@ -168,6 +174,12 @@ if(BUILD_TESTING)
     add_test(NAME preview_assets
         COMMAND "${CMAKE_COMMAND}" -DASSET_DIR=${CMAKE_SOURCE_DIR}/src/assets
             -P "${CMAKE_SOURCE_DIR}/tests/check_preview_assets.cmake")
+    add_test(NAME english_ui_language
+        COMMAND "${CMAKE_COMMAND}" -E env
+            "EDITMDVIEW_LANGUAGE=en-US"
+            "EDITMDVIEW_EXPECT_ENGLISH_UI=1"
+            "$<TARGET_FILE:wlx_harness>" "$<TARGET_FILE:editmdview>"
+            "${CMAKE_SOURCE_DIR}/CMakeLists.txt" 1)
     add_test(NAME repeated_open
         COMMAND wlx_harness "$<TARGET_FILE:editmdview>" "${CMAKE_SOURCE_DIR}/CMakeLists.txt" 10)
     add_test(NAME list_load_next_keeps_position
@@ -229,7 +241,7 @@ if(BUILD_TESTING)
             "EDITMDVIEW_EXPECT_PERSISTENT_STATE=1"
             "EDITMDVIEW_DATA_DIR=${CMAKE_BINARY_DIR}/persistent-state-test-data"
             "$<TARGET_FILE:wlx_harness>" "$<TARGET_FILE:editmdview>"
-            "${CMAKE_SOURCE_DIR}/samples/demo.md" 1)
+            "${CMAKE_BINARY_DIR}/persistent-view.md" 1)
     add_test(NAME automatic_configuration_reload
         COMMAND "${CMAKE_COMMAND}" -E env
             "EDITMDVIEW_EXPECT_CONFIG_RELOAD=1"
