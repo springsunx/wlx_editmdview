@@ -477,6 +477,8 @@ void Editor::copy() const { send(SCI_COPY); }
 void Editor::paste() const { send(SCI_PASTE); }
 void Editor::delete_selection() const { send(SCI_CLEAR); }
 void Editor::select_all() const { send(SCI_SELECTALL); }
+void Editor::uppercase_selection() const { send(SCI_UPPERCASE); }
+void Editor::lowercase_selection() const { send(SCI_LOWERCASE); }
 void Editor::undo() const { send(SCI_UNDO); }
 void Editor::redo() const { send(SCI_REDO); }
 bool Editor::can_undo() const { return send(SCI_CANUNDO) != 0; }

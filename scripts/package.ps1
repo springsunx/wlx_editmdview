@@ -2,7 +2,7 @@
 param(
     [ValidateSet('Debug', 'Release')]
     [string]$Configuration = 'Release',
-    [string]$Version = '0.5.10'
+    [string]$Version = '0.5.11'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,16 +47,13 @@ try {
     $pluginInfo = [regex]::Replace($pluginInfo, '(?m)^file=.*$', 'file=EditMdView.wlx')
     $pluginInfoPath = Join-Path $stagingRoot 'pluginst.inf'
     [IO.File]::WriteAllText($pluginInfoPath, $pluginInfo, [Text.UTF8Encoding]::new($false))
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $stagingRoot
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'CHANGELOG.md') -Destination $stagingRoot
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'SHORTCUTS.txt') -Destination $stagingRoot
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'language.ini') -Destination $stagingRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot 'lang') -Destination $stagingRoot -Recurse
     $docsRoot = Join-Path $stagingRoot 'docs'
     New-Item -ItemType Directory -Path $docsRoot | Out-Null
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\I18N.md') -Destination $docsRoot
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'docs\SCITE_PROPERTIES.md') -Destination $docsRoot
-    Copy-Item -LiteralPath (Join-Path $repoRoot 'THIRD_PARTY_NOTICES.md') -Destination $stagingRoot
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'README.md') -Destination $docsRoot
+    Get-ChildItem -LiteralPath (Join-Path $repoRoot 'docs') -File | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination $docsRoot
+    }
     Get-ChildItem -LiteralPath (Join-Path $repoRoot 'config') -File | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $stagingRoot
     }

@@ -5,11 +5,10 @@ Scintilla text editor with live Markdown and HTML preview. It is designed as a c
 offline-first plugin: the editor, lexers, Markdown renderer, preview assets, and syntax
 highlighter are compiled into the WLX binaries.
 
-Version 0.5.10 remembers editing and preview positions both while paging and across Total
-Commander restarts, restores the correct view mode without intermediate repaint jumps, and
-keeps an automatic recovery snapshot for unsaved edits. SciTE property files can be reloaded
-without reopening Lister, and Markdown editing includes list continuation, paired punctuation,
-selection formatting, a slash-command palette, and smart URL paste.
+Version 0.5.11 adds a searchable, localized shortcut window containing plugin commands,
+Scintilla defaults, and Markdown slash templates. It also completes the editor context menu
+with save and case-conversion commands, creates the per-user language preference on first run,
+and gathers release documentation under one `docs` directory.
 
 ## Features
 
@@ -37,6 +36,7 @@ selection formatting, a slash-command palette, and smart URL paste.
   CSS, shell, SQL, YAML, INI/properties, Apache config, CMake, Makefile, Batch,
   PowerShell, Rust, Lua, and Lisp/Scheme
 - Familiar context menu commands, word wrap, zoom, and go to line
+- Searchable, localized keyboard-shortcut window grouped by common, Markdown, editing, navigation, display, and search commands
 - Clickable status-bar fields for changing the active syntax language, converting CRLF/LF/CR
   line endings, and toggling word wrap without moving the caret in the viewport
 - Consistent 9pt `MS Shell Dlg` font for plugin UI controls; editor fonts remain controlled by SciTE properties
@@ -61,8 +61,8 @@ selection formatting, a slash-command palette, and smart URL paste.
 | `EditMdViewSave.exe` | Elevated save helper, used only after an access-denied save |
 | `pluginst.inf` | Total Commander automatic installer metadata |
 | `SciTE*.properties`, `*.properties` | Tested optional editor configuration |
-| `language.ini`, `lang\*.lng` | UI language selection and UTF-8 translation catalogs |
-| `SHORTCUTS.txt` | Complete Chinese keyboard reference |
+| `lang\*.lng` | UTF-8 UI translation catalogs |
+| `docs\*.md` | Changelog, shortcut reference, configuration guide, localization guide, and notices |
 
 The plugin uses `EditMdView.wlx64` (64-bit) or `EditMdView.wlx` (32-bit). Keep the bundled `EditMdViewSave.exe` beside the WLX files: it is launched with a UAC prompt only when Windows denies an ordinary save to a protected directory. Microsoft Edge WebView2 Runtime must be installed for rendered preview; editing remains available when the runtime is missing.
 The full release ZIP also includes a compact, tested SciTE configuration at the archive root.
@@ -73,7 +73,7 @@ prefer built-in defaults.
 
 ## Interface language
 
-Use the **语言 / Language** button on the main toolbar to switch between automatic Windows-language detection, Simplified Chinese, English, and any additional `lang\*.lng` catalogs. The change is applied immediately and remembered per Windows user. The packaged `language.ini` defaults to `auto`; `Ctrl+Shift+R` also reloads the active catalog after manual edits.
+Use the **语言 / Language** button on the main toolbar to switch between automatic Windows-language detection, Simplified Chinese, English, and any additional `lang\*.lng` catalogs. The change is applied immediately and remembered per Windows user. `%LOCALAPPDATA%\EditMdView\language.ini` is created automatically with `language=auto` on first run; `Ctrl+Shift+R` also reloads the active catalog after manual edits.
 
 See [Interface languages](docs/I18N.md) for the lookup order and custom-language file format.
 ## SciTE configuration
@@ -143,6 +143,8 @@ open in rendered preview; other accepted text opens in the editor.
 
 ## Keyboard
 
+Open **More → Keyboard Shortcuts…** for a searchable, modeless list of all plugin and Scintilla key bindings. The list can be searched by action name or key combination and follows the selected interface language.
+
 - `Ctrl+S`: save
 - `Ctrl+Shift+S`: save as and continue editing the new file
 - `Ctrl+F`: focus the search box
@@ -162,7 +164,7 @@ open in rendered preview; other accepted text opens in the editor.
 - `Alt+Z`: toggle word wrap
 - Click the word-wrap indicator in the status bar to toggle wrapping without moving the caret in the viewport
 
-The release archive also includes `SHORTCUTS.txt`, a complete Chinese shortcut reference. Find and replace use
+The release archive also includes [the complete Chinese shortcut reference](docs/SHORTCUTS.md). Find and replace use
 editable drop-down lists with up to 20 deduplicated entries each. The runtime history is saved as
 `EditMdView.history.ini` beside the plugin binary, and is intentionally not included in release archives.
 
@@ -180,4 +182,6 @@ CudaLister's content-first text detection; its implementation and component arch
 | `src/document.*` | Encoding-aware file loading and saving |
 | `src/scite_properties.*` | Safe SciTE property parsing, imports, expansion, and reload tracking |
 | `src/session_state.*` | Per-document view persistence and recovery metadata |
+| `src/shortcut_catalog.*` | Shared categorized data for the searchable shortcut window |
 | `tests/`, `tools/wlx_harness.cpp` | Core tests and real WLX integration harness |
+| `docs/` | Shortcut reference, changelog, configuration and localization guides, and third-party notices |

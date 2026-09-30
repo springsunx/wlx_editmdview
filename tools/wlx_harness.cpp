@@ -133,6 +133,26 @@ void pump_messages(DWORD milliseconds) {
     }
 }
 
+bool shortcuts_dialog_works(HWND pluginWindow) {
+    constexpr UINT showShortcuts = WM_APP + 20;
+    SendMessageW(pluginWindow, showShortcuts, 0, 0);
+    pump_messages(100);
+    const HWND dialog = find_thread_window_by_class(L"EditMdView.Shortcuts");
+    const HWND search = dialog ? find_control_by_id(dialog, 6101) : nullptr;
+    const HWND list = dialog ? find_control_by_id(dialog, 6102) : nullptr;
+    if (!dialog || !search || !list || ListView_GetItemCount(list) < 60) return false;
+
+    SetWindowTextW(search, L"Ctrl + Shift + U");
+    pump_messages(50);
+    wchar_t action[128]{};
+    if (ListView_GetItemCount(list) != 1) return false;
+    ListView_GetItemText(list, 0, 0, action, static_cast<int>(std::size(action)));
+    const bool matched = wcscmp(action, L"Uppercase") == 0 || wcscmp(action, L"转为大写") == 0;
+    SendMessageW(dialog, WM_CLOSE, 0, 0);
+    pump_messages(50);
+    return matched && find_thread_window_by_class(L"EditMdView.Shortcuts") == nullptr;
+}
+
 bool write_recovery_snapshot_for_test(HWND pluginWindow, const std::filesystem::path& dataDirectory) {
     const HWND editor = FindWindowExW(pluginWindow, nullptr, L"Scintilla", nullptr);
     if (!editor) return false;
@@ -449,6 +469,16 @@ bool editor_commands_work(HWND pluginWindow, const std::filesystem::path& path) 
     std::string originalText(static_cast<std::size_t>(originalLength) + 1, '\0');
     SendMessageA(editor, SCI_GETTEXT, originalLength + 1, reinterpret_cast<LPARAM>(originalText.data()));
     originalText.resize(static_cast<std::size_t>(originalLength));
+    constexpr char caseTestText[] = "Abc XYZ";
+    SendMessageA(editor, SCI_SETTEXT, 0, reinterpret_cast<LPARAM>(caseTestText));
+    SendMessageW(editor, SCI_SETSEL, 0, 3);
+    SendMessageW(editor, SCI_UPPERCASE, 0, 0);
+    SendMessageW(editor, SCI_SETSEL, 4, 7);
+    SendMessageW(editor, SCI_LOWERCASE, 0, 0);
+    char convertedCaseText[sizeof(caseTestText)]{};
+    SendMessageA(editor, SCI_GETTEXT, sizeof(convertedCaseText),
+        reinterpret_cast<LPARAM>(convertedCaseText));
+    const bool caseConversionWorks = strcmp(convertedCaseText, "ABC xyz") == 0;
     std::string viewTestText;
     for (int line = 0; line < 140; ++line) {
         viewTestText += std::to_string(line) + ": " + std::string(420, 'x') + "\n";
@@ -513,7 +543,8 @@ bool editor_commands_work(HWND pluginWindow, const std::filesystem::path& path) 
         SendMessageW(editor, SCI_GETMODIFY, 0, 0) == 0;
     SendMessageW(pluginWindow, setLanguage, originalLanguage, 0);
 
-    return wrapBefore != wrapAfter && statusWrapWorks && zoomAfter > zoomBefore && eolChanged && languageChanged &&
+    return caseConversionWorks && wrapBefore != wrapAfter && statusWrapWorks &&
+        zoomAfter > zoomBefore && eolChanged && languageChanged &&
         SendMessageW(editor, SCI_GETEOLMODE, 0, 0) == originalEol;
 }
 
@@ -1017,6 +1048,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         L"EDITMDVIEW_EXPECT_CONFIG_RELOAD", nullptr, 0) > 0;
     const bool englishUiTest = GetEnvironmentVariableW(
         L"EDITMDVIEW_EXPECT_ENGLISH_UI", nullptr, 0) > 0;
+    const bool shortcutsDialogTest = GetEnvironmentVariableW(
+        L"EDITMDVIEW_EXPECT_SHORTCUTS_DIALOG", nullptr, 0) > 0;
     if (persistentStateTest || recoverySnapshotTest || configurationReloadTest) {
         std::error_code cleanupError;
         std::filesystem::remove_all(runtimeDataDirectory, cleanupError);
@@ -1139,6 +1172,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         FreeLibrary(g_plugin);
         if (SUCCEEDED(comResult)) CoUninitialize();
         return translated && textFits ? 0 : 43;
+    }
+    if (shortcutsDialogTest) {
+        const bool works = shortcuts_dialog_works(g_pluginWindow);
+        g_closePlugin(g_pluginWindow);
+        g_pluginWindow = nullptr;
+        DestroyWindow(host);
+        FreeLibrary(g_plugin);
+        if (SUCCEEDED(comResult)) CoUninitialize();
+        return works ? 0 : 44;
     }
     if (configurationReloadTest) {
         const HWND editor = FindWindowExW(g_pluginWindow, nullptr, L"Scintilla", nullptr);

@@ -434,8 +434,13 @@ int main() {
         "custom language files are discovered for the toolbar menu");
     const auto previousLocalAppData = environment_value(L"LOCALAPPDATA");
     const auto languagePreferenceRoot = i18nDirectory / L"user-data";
+    std::filesystem::remove_all(languagePreferenceRoot);
     SetEnvironmentVariableW(L"EDITMDVIEW_LANGUAGE", nullptr);
     SetEnvironmentVariableW(L"LOCALAPPDATA", languagePreferenceRoot.c_str());
+    i18n::initialize(i18nModule);
+    check(i18n::selected_language() == L"auto" && std::filesystem::is_regular_file(
+        languagePreferenceRoot / L"EditMdView" / L"language.ini"),
+        "default language preference is created automatically on first run");
     std::wstring languageError;
     check(i18n::select_language(i18nModule, L"fr-FR", languageError) &&
         i18n::selected_language() == L"fr-FR" && i18n::text(L"Save") == L"Enregistrer",

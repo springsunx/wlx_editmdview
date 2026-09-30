@@ -62,6 +62,9 @@ private:
     static LRESULT CALLBACK replace_window_proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK replace_control_subclass_proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
         UINT_PTR subclassId, DWORD_PTR referenceData);
+    static LRESULT CALLBACK shortcuts_window_proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
+    static LRESULT CALLBACK shortcuts_control_subclass_proc(HWND window, UINT message, WPARAM wParam,
+        LPARAM lParam, UINT_PTR subclassId, DWORD_PTR referenceData);
     static LRESULT CALLBACK slash_window_proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     static LRESULT CALLBACK slash_control_subclass_proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
         UINT_PTR subclassId, DWORD_PTR referenceData);
@@ -93,6 +96,9 @@ private:
     void show_go_to_line();
     void show_replace_dialog();
     void perform_replace_action(int command);
+    void show_shortcuts_dialog();
+    void populate_shortcuts();
+    void layout_shortcuts_dialog();
     void load_search_history();
     void remember_search_history(std::wstring_view find,
         std::optional<std::wstring_view> replacement = std::nullopt);
@@ -137,6 +143,10 @@ private:
     HWND replaceFindCombo_ = nullptr;
     HWND replaceWithCombo_ = nullptr;
     HWND replaceResult_ = nullptr;
+    HWND shortcutsDialog_ = nullptr;
+    HWND shortcutsSearch_ = nullptr;
+    HWND shortcutsList_ = nullptr;
+    HANDLE shortcutsRowImageList_ = nullptr;
     std::vector<std::wstring> findHistory_;
     std::vector<std::wstring> replaceHistory_;
     std::wstring lastPreviewFind_;

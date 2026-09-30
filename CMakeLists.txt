@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(EditMdView VERSION 0.5.10 LANGUAGES C CXX RC)
+project(EditMdView VERSION 0.5.11 LANGUAGES C CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "EditMdView is a Windows-only Total Commander WLX plugin")
@@ -104,6 +104,7 @@ add_library(editmdview SHARED
     src/preview.cpp
     src/scite_properties.cpp
     src/session_state.cpp
+    src/shortcut_catalog.cpp
     src/text_detection.cpp
     src/resources.rc
     src/editmdview.def)
@@ -125,8 +126,6 @@ set_target_properties(editmdview PROPERTIES
     SUFFIX "${EDITMDVIEW_WLX_SUFFIX}"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 add_custom_command(TARGET editmdview POST_BUILD
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "${CMAKE_SOURCE_DIR}/language.ini" "$<TARGET_FILE_DIR:editmdview>/language.ini"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
         "${CMAKE_SOURCE_DIR}/lang" "$<TARGET_FILE_DIR:editmdview>/lang")
 
@@ -178,6 +177,11 @@ if(BUILD_TESTING)
         COMMAND "${CMAKE_COMMAND}" -E env
             "EDITMDVIEW_LANGUAGE=en-US"
             "EDITMDVIEW_EXPECT_ENGLISH_UI=1"
+            "$<TARGET_FILE:wlx_harness>" "$<TARGET_FILE:editmdview>"
+            "${CMAKE_SOURCE_DIR}/CMakeLists.txt" 1)
+    add_test(NAME shortcuts_dialog
+        COMMAND "${CMAKE_COMMAND}" -E env
+            "EDITMDVIEW_EXPECT_SHORTCUTS_DIALOG=1"
             "$<TARGET_FILE:wlx_harness>" "$<TARGET_FILE:editmdview>"
             "${CMAKE_SOURCE_DIR}/CMakeLists.txt" 1)
     add_test(NAME repeated_open

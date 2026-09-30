@@ -58,6 +58,8 @@ public:
     void paste() const;
     void delete_selection() const;
     void select_all() const;
+    void uppercase_selection() const;
+    void lowercase_selection() const;
     void undo() const;
     void redo() const;
     bool can_undo() const;

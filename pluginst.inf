@@ -1,6 +1,6 @@
 [plugininstall]
 description=EditMdView - text editor and Markdown/HTML viewer
-version=0.5.10
+version=0.5.11
 type=wlx
 file=EditMdView.wlx
 defaultdir=EditMdView

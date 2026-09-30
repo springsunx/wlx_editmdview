@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.11
+
+- Added a searchable, localized, modeless shortcut window with 100 plugin, Scintilla,
+  Markdown slash-command, navigation, display, and search entries.
+- Added Save, Uppercase, and Lowercase to the editor context menu with visible shortcut hints.
+- Converted the complete shortcut reference to a grouped Markdown table and gathered release
+  documentation under the `docs` directory.
+- Made `%LOCALAPPDATA%\EditMdView\language.ini` appear automatically on first run; the release
+  package no longer installs a writable preference file beside the plugin binaries.
+- Added x86 and x64 integration coverage for shortcut-window creation, filtering, closing,
+  and safe plugin teardown.
+
 ## 0.5.10
 
 - Added interface localization with Simplified Chinese and English catalogs, automatic Windows

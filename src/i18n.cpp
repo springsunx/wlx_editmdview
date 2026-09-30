@@ -122,6 +122,27 @@ std::wstring read_language_setting(const std::filesystem::path& path) {
     return {};
 }
 
+bool write_language_setting(const std::filesystem::path& path, std::wstring_view selection) {
+    if (path.empty()) return false;
+    std::error_code fileError;
+    std::filesystem::create_directories(path.parent_path(), fileError);
+    if (fileError) return false;
+
+    const auto temporary = path.wstring() + L".tmp";
+    {
+        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+        if (!output) return false;
+        output << "# auto, zh-CN, en-US, or another file name from lang\n"
+               << "language=" << wide_to_utf8(selection) << '\n';
+    }
+    if (MoveFileExW(temporary.c_str(), path.c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        return true;
+    }
+    DeleteFileW(temporary.c_str());
+    return false;
+}
+
 std::wstring resolve_language(std::wstring selection) {
     if (selection.empty() || lower_wide(selection) == L"auto") {
         wchar_t localeName[LOCALE_NAME_MAX_LENGTH]{};
@@ -142,8 +163,19 @@ std::wstring configured_selection(const std::filesystem::path& modulePath) {
     std::wstring configured = environment_value(L"EDITMDVIEW_LANGUAGE");
     if (!configured.empty()) return configured;
     const auto userPath = user_language_path();
-    if (!userPath.empty()) configured = read_language_setting(userPath);
-    if (configured.empty()) configured = read_language_setting(modulePath.parent_path() / L"language.ini");
+    if (!userPath.empty()) {
+        configured = read_language_setting(userPath);
+        std::error_code existsError;
+        const bool userSettingExists = std::filesystem::exists(userPath, existsError);
+        if (configured.empty() && !existsError && !userSettingExists) {
+            const std::wstring legacy = read_language_setting(modulePath.parent_path() / L"language.ini");
+            configured = legacy.empty() ? L"auto" : legacy;
+            write_language_setting(userPath, configured);
+        }
+    }
+    if (configured.empty()) {
+        configured = read_language_setting(modulePath.parent_path() / L"language.ini");
+    }
     return configured.empty() ? L"auto" : configured;
 }
 bool load_file(const std::filesystem::path& path,
@@ -233,25 +265,8 @@ bool select_language(const std::filesystem::path& modulePath, std::wstring_view 
         error = text(L"LOCALAPPDATA is unavailable.");
         return false;
     }
-    std::error_code fileError;
-    std::filesystem::create_directories(path.parent_path(), fileError);
-    if (fileError) {
-        error = text(L"Unable to create the language settings folder.");
-        return false;
-    }
-    const auto temporary = path.wstring() + L".tmp";
-    {
-        std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-        if (!output) {
-            error = text(L"Unable to write the language setting.");
-            return false;
-        }
-        output << "language=" << wide_to_utf8(selection) << '\n';
-    }
-    if (!MoveFileExW(temporary.c_str(), path.c_str(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        DeleteFileW(temporary.c_str());
-        error = text(L"Unable to replace the language setting.");
+    if (!write_language_setting(path, selection)) {
+        error = text(L"Unable to write the language setting.");
         return false;
     }
     {

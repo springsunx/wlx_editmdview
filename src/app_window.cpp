@@ -3,6 +3,7 @@
 #include "html_preview.hpp"
 #include "i18n.hpp"
 #include "markdown.hpp"
+#include "shortcut_catalog.hpp"
 #include "wlx_api.h"
 
 #include <Scintilla.h>
@@ -61,6 +62,7 @@ constexpr UINT kMessagePreviewReady = WM_APP + 16;
 constexpr UINT kMessageReloadConfiguration = WM_APP + 17;
 constexpr UINT kMessageRestoreEditorView = WM_APP + 18;
 constexpr UINT kMessageSaveAs = WM_APP + 19;
+constexpr UINT kMessageShowShortcuts = WM_APP + 20;
 
 constexpr int kIdEdit = 1001;
 constexpr int kIdSplit = 1002;
@@ -90,6 +92,9 @@ constexpr int kMenuReplace = 2013;
 constexpr int kMenuReloadConfiguration = 2014;
 constexpr int kMenuSave = 2015;
 constexpr int kMenuSaveAs = 2016;
+constexpr int kMenuUppercase = 2017;
+constexpr int kMenuLowercase = 2018;
+constexpr int kMenuShortcuts = 2019;
 
 constexpr int kMenuEolCrLf = 4101;
 constexpr int kMenuEolLf = 4102;
@@ -139,6 +144,10 @@ constexpr int kReplaceAll = 3108;
 constexpr int kReplaceClose = 3109;
 constexpr int kReplaceResult = 3110;
 constexpr std::size_t kHistoryLimit = 20;
+
+constexpr wchar_t kShortcutsWindowClass[] = L"EditMdView.Shortcuts";
+constexpr int kShortcutsSearch = 6101;
+constexpr int kShortcutsList = 6102;
 
 constexpr wchar_t kSlashWindowClass[] = L"EditMdView.MarkdownSlash";
 constexpr int kSlashRows = 5101;
@@ -664,6 +673,7 @@ void AppWindow::unregister_classes(HINSTANCE instance) noexcept {
     // These classes all contain callbacks into this DLL, so none may outlive
     // a dynamic unload/reload cycle in the Total Commander process.
     UnregisterClassW(kReplaceWindowClass, instance);
+    UnregisterClassW(kShortcutsWindowClass, instance);
     UnregisterClassW(kGoToLineClass, instance);
     UnregisterClassW(kSlashWindowClass, instance);
     UnregisterClassW(kWindowClass, instance);
@@ -701,6 +711,7 @@ AppWindow::~AppWindow() {
     previewRenderWorker_.reset();
     if (slashPopup_ && IsWindow(slashPopup_)) DestroyWindow(slashPopup_);
     if (replaceDialog_ && IsWindow(replaceDialog_)) DestroyWindow(replaceDialog_);
+    if (shortcutsDialog_ && IsWindow(shortcutsDialog_)) DestroyWindow(shortcutsDialog_);
     if (editor_.handle()) RemoveWindowSubclass(editor_.handle(), editor_subclass_proc, 1);
     if (toolbar_) RemoveWindowSubclass(toolbar_, toolbar_subclass_proc, 3);
     if (status_) RemoveWindowSubclass(status_, status_subclass_proc, 5);
@@ -716,7 +727,8 @@ bool AppWindow::initialize(HWND window) {
     window_ = window;
     uiFont_ = create_ui_font(window_);
     load_search_history();
-    INITCOMMONCONTROLSEX commonControls{sizeof(commonControls), ICC_BAR_CLASSES};
+    INITCOMMONCONTROLSEX commonControls{
+        sizeof(commonControls), ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES};
     InitCommonControlsEx(&commonControls);
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     comInitialized_ = SUCCEEDED(comResult);
@@ -924,6 +936,12 @@ LRESULT CALLBACK AppWindow::editor_subclass_proc(HWND window, UINT message, WPAR
                 return 0;
             }
         }
+        if (control && !alt && wParam == 'U') {
+            if (shift) self->editor_.uppercase_selection();
+            else self->editor_.lowercase_selection();
+            self->update_status();
+            return 0;
+        }
         if (control && wParam == 'S') {
             PostMessageW(self->window_, shift ? kMessageSaveAs : kMessageSave, 0, 0);
             return 0;
@@ -1061,6 +1079,86 @@ LRESULT CALLBACK AppWindow::replace_window_proc(HWND window, UINT message, WPARA
         self->replaceWithCombo_ = nullptr;
         self->replaceResult_ = nullptr;
         SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+    }
+    return DefWindowProcW(window, message, wParam, lParam);
+}
+
+LRESULT CALLBACK AppWindow::shortcuts_control_subclass_proc(HWND window, UINT message,
+    WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR referenceData) {
+    auto* self = reinterpret_cast<AppWindow*>(referenceData);
+    if (message == WM_KEYDOWN && self && self->shortcutsDialog_) {
+        const bool control = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        if (wParam == VK_ESCAPE) {
+            DestroyWindow(self->shortcutsDialog_);
+            return 0;
+        }
+        if (control && wParam == 'F') {
+            SetFocus(self->shortcutsSearch_);
+            SendMessageW(self->shortcutsSearch_, EM_SETSEL, 0, -1);
+            return 0;
+        }
+        if (wParam == VK_TAB) {
+            const BOOL previous = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+            if (HWND next = GetNextDlgTabItem(self->shortcutsDialog_, window, previous)) {
+                SetFocus(next);
+            }
+            return 0;
+        }
+        if (window == self->shortcutsSearch_ && wParam == VK_DOWN &&
+            ListView_GetItemCount(self->shortcutsList_) > 0) {
+            ListView_SetItemState(self->shortcutsList_, 0,
+                LVIS_FOCUSED | LVIS_SELECTED, LVIS_FOCUSED | LVIS_SELECTED);
+            ListView_EnsureVisible(self->shortcutsList_, 0, FALSE);
+            SetFocus(self->shortcutsList_);
+            return 0;
+        }
+    }
+    return DefSubclassProc(window, message, wParam, lParam);
+}
+
+LRESULT CALLBACK AppWindow::shortcuts_window_proc(HWND window, UINT message,
+    WPARAM wParam, LPARAM lParam) {
+    auto* self = reinterpret_cast<AppWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+        const auto* create = reinterpret_cast<CREATESTRUCTW*>(lParam);
+        self = static_cast<AppWindow*>(create->lpCreateParams);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    }
+    if (!self) return DefWindowProcW(window, message, wParam, lParam);
+
+    switch (message) {
+    case WM_SIZE:
+        self->layout_shortcuts_dialog();
+        return 0;
+    case WM_GETMINMAXINFO: {
+        auto* limits = reinterpret_cast<MINMAXINFO*>(lParam);
+        limits->ptMinTrackSize = POINT{390, 430};
+        return 0;
+    }
+    case WM_COMMAND:
+        if (LOWORD(wParam) == kShortcutsSearch && HIWORD(wParam) == EN_CHANGE) {
+            self->populate_shortcuts();
+            return 0;
+        }
+        break;
+    case WM_SETFOCUS:
+        if (self->shortcutsSearch_) SetFocus(self->shortcutsSearch_);
+        return 0;
+    case WM_CLOSE:
+        DestroyWindow(window);
+        return 0;
+    case WM_NCDESTROY:
+        if (self->shortcutsRowImageList_) {
+            ImageList_Destroy(reinterpret_cast<HIMAGELIST>(self->shortcutsRowImageList_));
+            self->shortcutsRowImageList_ = nullptr;
+        }
+        self->shortcutsDialog_ = nullptr;
+        self->shortcutsSearch_ = nullptr;
+        self->shortcutsList_ = nullptr;
+        SetWindowLongPtrW(window, GWLP_USERDATA, 0);
+        break;
+    default:
+        break;
     }
     return DefWindowProcW(window, message, wParam, lParam);
 }
@@ -1483,6 +1581,9 @@ LRESULT AppWindow::handle_message(UINT message, WPARAM wParam, LPARAM lParam) {
         return 0;
     case kMessageReloadConfiguration:
         reload_configuration(false);
+        return 0;
+    case kMessageShowShortcuts:
+        show_shortcuts_dialog();
         return 0;
     case kMessageRestoreEditorView:
         restore_pending_editor_view_state();
@@ -2014,6 +2115,12 @@ void AppWindow::apply_ui_language() {
     SetWindowTextW(GetDlgItem(toolbar_, kIdMore), i18n::text(L"More").c_str());
     SetWindowTextW(GetDlgItem(toolbar_, kIdFindNext), i18n::text(L"Find").c_str());
     SetWindowTextW(GetDlgItem(toolbar_, kIdReplace), i18n::text(L"Replace").c_str());
+    if (shortcutsDialog_ && IsWindow(shortcutsDialog_)) {
+        SetWindowTextW(shortcutsDialog_, i18n::text(L"Keyboard Shortcuts").c_str());
+        SendMessageW(shortcutsSearch_, EM_SETCUEBANNER, TRUE,
+            reinterpret_cast<LPARAM>(i18n::text(L"Search shortcuts").c_str()));
+        populate_shortcuts();
+    }
     if (replaceDialog_ && IsWindow(replaceDialog_)) DestroyWindow(replaceDialog_);
     hide_slash_popup();
     reload_configuration(false, false);
@@ -2066,7 +2173,13 @@ void AppWindow::show_editor_menu(POINT screenPoint, bool contextMenu) {
         AppendMenuW(menu, MF_STRING, kMenuDelete, i18n::text(L"Delete").c_str());
         AppendMenuW(menu, MF_STRING, kMenuSelectAll, i18n::text(L"Select All\tCtrl+A").c_str());
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, kMenuUppercase,
+            i18n::text(L"Uppercase\tCtrl+Shift+U").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuLowercase,
+            i18n::text(L"Lowercase\tCtrl+U").c_str());
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, kMenuReplace, i18n::text(L"Replace…\tCtrl+H").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuSave, i18n::text(L"Save\tCtrl+S").c_str());
     } else {
         // Less frequent document and view commands live under More.
         AppendMenuW(menu, MF_STRING, kMenuSaveAs, i18n::text(L"Save As…\tCtrl+Shift+S").c_str());
@@ -2080,6 +2193,8 @@ void AppWindow::show_editor_menu(POINT screenPoint, bool contextMenu) {
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, kMenuReloadConfiguration,
             i18n::text(L"Reload Configuration\tCtrl+Shift+R").c_str());
+        AppendMenuW(menu, MF_STRING, kMenuShortcuts,
+            i18n::text(L"Keyboard Shortcuts…").c_str());
     }
 
     if (contextMenu) {
@@ -2091,14 +2206,19 @@ void AppWindow::show_editor_menu(POINT screenPoint, bool contextMenu) {
         EnableMenuItem(menu, kMenuCut, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, kMenuCopy, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, kMenuDelete, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, kMenuUppercase, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, kMenuLowercase, MF_BYCOMMAND | (selection ? MF_ENABLED : MF_GRAYED));
         EnableMenuItem(menu, kMenuPaste,
             MF_BYCOMMAND | (editor_.can_paste() ? MF_ENABLED : MF_GRAYED));
+        EnableMenuItem(menu, kMenuSave,
+            MF_BYCOMMAND | (editor_.modified() ? MF_ENABLED : MF_GRAYED));
     }
 
     const int command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
         screenPoint.x, screenPoint.y, 0, window_, nullptr);
     DestroyMenu(menu);
     switch (command) {
+    case kMenuSave: save(); break;
     case kMenuSaveAs: save_as(); break;
     case kMenuUndo: editor_.undo(); break;
     case kMenuRedo: editor_.redo(); break;
@@ -2109,6 +2229,8 @@ void AppWindow::show_editor_menu(POINT screenPoint, bool contextMenu) {
         break;
     case kMenuDelete: editor_.delete_selection(); break;
     case kMenuSelectAll: editor_.select_all(); break;
+    case kMenuUppercase: editor_.uppercase_selection(); break;
+    case kMenuLowercase: editor_.lowercase_selection(); break;
     case kMenuReplace: show_replace_dialog(); break;
     case kMenuGoToLine: show_go_to_line(); break;
     case kMenuWrap: editor_.toggle_wrap(); break;
@@ -2116,9 +2238,10 @@ void AppWindow::show_editor_menu(POINT screenPoint, bool contextMenu) {
     case kMenuZoomOut: editor_.zoom_out(); break;
     case kMenuZoomReset: editor_.reset_zoom(); break;
     case kMenuReloadConfiguration: reload_configuration(false); break;
+    case kMenuShortcuts: show_shortcuts_dialog(); break;
     default: break;
     }
-    if (command != 0 && command != kMenuReplace) {
+    if (command != 0 && command != kMenuReplace && command != kMenuShortcuts) {
         editor_.focus();
         update_status();
     }
@@ -2272,6 +2395,164 @@ void AppWindow::perform_replace_action(int command) {
         if (replaceResult_) SetWindowTextW(replaceResult_, message.c_str());
     }
     update_status();
+}
+
+void AppWindow::show_shortcuts_dialog() {
+    if (shortcutsDialog_ && IsWindow(shortcutsDialog_)) {
+        ShowWindow(shortcutsDialog_, SW_RESTORE);
+        SetForegroundWindow(shortcutsDialog_);
+        SetFocus(shortcutsSearch_);
+        return;
+    }
+
+    WNDCLASSEXW windowClass{sizeof(windowClass)};
+    windowClass.lpfnWndProc = shortcuts_window_proc;
+    windowClass.hInstance = instance_;
+    windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    windowClass.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    windowClass.lpszClassName = kShortcutsWindowClass;
+    if (!RegisterClassExW(&windowClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        MessageBeep(MB_ICONERROR);
+        return;
+    }
+
+    HWND owner = GetAncestor(window_, GA_ROOT);
+    RECT ownerBounds{};
+    GetWindowRect(owner, &ownerBounds);
+    RECT bounds{0, 0, 540, 680};
+    constexpr DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_THICKFRAME |
+        WS_CLIPCHILDREN;
+    constexpr DWORD extendedStyle = WS_EX_TOOLWINDOW | WS_EX_CONTROLPARENT;
+    AdjustWindowRectEx(&bounds, style, FALSE, extendedStyle);
+    const int width = bounds.right - bounds.left;
+    const int height = bounds.bottom - bounds.top;
+    RECT workArea{};
+    SystemParametersInfoW(SPI_GETWORKAREA, 0, &workArea, 0);
+    const int left = std::clamp(static_cast<int>(ownerBounds.right) - width - 28,
+        static_cast<int>(workArea.left), std::max(static_cast<int>(workArea.left),
+            static_cast<int>(workArea.right) - width));
+    const int top = std::clamp(static_cast<int>(ownerBounds.top) + 28,
+        static_cast<int>(workArea.top), std::max(static_cast<int>(workArea.top),
+            static_cast<int>(workArea.bottom) - height));
+
+    shortcutsDialog_ = CreateWindowExW(extendedStyle, kShortcutsWindowClass,
+        i18n::text(L"Keyboard Shortcuts").c_str(), style,
+        left, top, width, height, owner, nullptr, instance_, this);
+    if (!shortcutsDialog_) return;
+
+    shortcutsSearch_ = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+        0, 0, 100, 28, shortcutsDialog_,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kShortcutsSearch)), instance_, nullptr);
+    shortcutsList_ = CreateWindowExW(WS_EX_CLIENTEDGE, WC_LISTVIEWW, L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | LVS_REPORT | LVS_SINGLESEL |
+            LVS_SHOWSELALWAYS | LVS_NOCOLUMNHEADER,
+        0, 0, 100, 100, shortcutsDialog_,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(kShortcutsList)), instance_, nullptr);
+    if (!shortcutsSearch_ || !shortcutsList_) {
+        DestroyWindow(shortcutsDialog_);
+        return;
+    }
+
+    const HFONT font = uiFont_ ? uiFont_ : static_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT));
+    SendMessageW(shortcutsSearch_, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    SendMessageW(shortcutsList_, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
+    SendMessageW(shortcutsSearch_, EM_SETCUEBANNER, TRUE,
+        reinterpret_cast<LPARAM>(i18n::text(L"Search shortcuts").c_str()));
+    SetWindowSubclass(shortcutsSearch_, shortcuts_control_subclass_proc, 7,
+        reinterpret_cast<DWORD_PTR>(this));
+    SetWindowSubclass(shortcutsList_, shortcuts_control_subclass_proc, 8,
+        reinterpret_cast<DWORD_PTR>(this));
+
+    ListView_SetExtendedListViewStyle(shortcutsList_,
+        LVS_EX_FULLROWSELECT | LVS_EX_DOUBLEBUFFER | LVS_EX_LABELTIP);
+    ListView_EnableGroupView(shortcutsList_, TRUE);
+    LVCOLUMNW column{};
+    column.mask = LVCF_WIDTH | LVCF_TEXT;
+    column.cx = 280;
+    std::wstring actionHeader = i18n::text(L"Action");
+    column.pszText = actionHeader.data();
+    ListView_InsertColumn(shortcutsList_, 0, &column);
+    column.cx = 210;
+    std::wstring shortcutHeader = i18n::text(L"Shortcut");
+    column.pszText = shortcutHeader.data();
+    ListView_InsertColumn(shortcutsList_, 1, &column);
+    shortcutsRowImageList_ = ImageList_Create(1, 30, ILC_COLOR32, 1, 1);
+    if (shortcutsRowImageList_) {
+        ListView_SetImageList(shortcutsList_,
+            reinterpret_cast<HIMAGELIST>(shortcutsRowImageList_), LVSIL_SMALL);
+    }
+
+    layout_shortcuts_dialog();
+    populate_shortcuts();
+    ShowWindow(shortcutsDialog_, SW_SHOWNORMAL);
+    UpdateWindow(shortcutsDialog_);
+    SetFocus(shortcutsSearch_);
+}
+
+void AppWindow::layout_shortcuts_dialog() {
+    if (!shortcutsDialog_ || !shortcutsSearch_ || !shortcutsList_) return;
+    RECT client{};
+    GetClientRect(shortcutsDialog_, &client);
+    const int width = std::max(0, static_cast<int>(client.right - client.left));
+    const int height = std::max(0, static_cast<int>(client.bottom - client.top));
+    constexpr int margin = 14;
+    constexpr int searchHeight = 30;
+    constexpr int gap = 12;
+    MoveWindow(shortcutsSearch_, margin, margin, std::max(0, width - margin * 2),
+        searchHeight, TRUE);
+    MoveWindow(shortcutsList_, margin, margin + searchHeight + gap,
+        std::max(0, width - margin * 2),
+        std::max(0, height - margin * 2 - searchHeight - gap), TRUE);
+    const int listWidth = std::max(0, width - margin * 2 - 6);
+    const int actionWidth = std::max(180, listWidth * 55 / 100);
+    ListView_SetColumnWidth(shortcutsList_, 0, actionWidth);
+    ListView_SetColumnWidth(shortcutsList_, 1, std::max(120, listWidth - actionWidth));
+}
+
+void AppWindow::populate_shortcuts() {
+    if (!shortcutsList_) return;
+    const std::wstring filter = lower_wide(window_text(shortcutsSearch_));
+    SendMessageW(shortcutsList_, WM_SETREDRAW, FALSE, 0);
+    ListView_DeleteAllItems(shortcutsList_);
+    ListView_RemoveAllGroups(shortcutsList_);
+
+    std::wstring activeGroup;
+    int groupId = 0;
+    for (const ShortcutEntry& entry : shortcut_catalog()) {
+        const std::wstring translatedGroup = i18n::text(entry.group);
+        const std::wstring translatedAction = i18n::text(entry.action);
+        std::wstring searchable = translatedGroup + L" " + translatedAction + L" " + entry.keys +
+            L" " + entry.group + L" " + entry.action;
+        if (!filter.empty() && lower_wide(std::move(searchable)).find(filter) == std::wstring::npos) {
+            continue;
+        }
+
+        if (activeGroup != entry.group) {
+            activeGroup = entry.group;
+            ++groupId;
+            LVGROUP group{sizeof(group)};
+            group.mask = LVGF_GROUPID | LVGF_HEADER;
+            group.iGroupId = groupId;
+            std::wstring header = translatedGroup;
+            group.pszHeader = header.data();
+            ListView_InsertGroup(shortcutsList_, -1, &group);
+        }
+
+        LVITEMW item{};
+        item.mask = LVIF_TEXT | LVIF_GROUPID;
+        item.iItem = ListView_GetItemCount(shortcutsList_);
+        item.iGroupId = groupId;
+        item.pszText = const_cast<wchar_t*>(translatedAction.c_str());
+        const int itemIndex = ListView_InsertItem(shortcutsList_, &item);
+        if (itemIndex >= 0) {
+            ListView_SetItemText(shortcutsList_, itemIndex, 1,
+                const_cast<wchar_t*>(entry.keys));
+        }
+    }
+
+    SendMessageW(shortcutsList_, WM_SETREDRAW, TRUE, 0);
+    InvalidateRect(shortcutsList_, nullptr, TRUE);
 }
 
 void AppWindow::update_slash_popup() {
