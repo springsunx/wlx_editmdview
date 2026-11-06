@@ -5,10 +5,10 @@ Scintilla text editor with live Markdown and HTML preview. It is designed as a c
 offline-first plugin: the editor, lexers, Markdown renderer, preview assets, and syntax
 highlighter are compiled into the WLX binaries.
 
-Version 0.5.11 adds a searchable, localized shortcut window containing plugin commands,
-Scintilla defaults, and Markdown slash templates. It also completes the editor context menu
-with save and case-conversion commands, creates the per-user language preference on first run,
-and gathers release documentation under one `docs` directory.
+Version 0.5.12 fixes the editor scrollbar stopping before the end of long Markdown files
+on first opening, including after spending time in preview. Long document outlines can
+now scroll independently, reveal heading titles, follow the current section, and support
+keyboard navigation to the first or last heading.
 
 ## Features
 

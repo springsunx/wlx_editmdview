@@ -1048,6 +1048,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         L"EDITMDVIEW_EXPECT_CONFIG_RELOAD", nullptr, 0) > 0;
     const bool englishUiTest = GetEnvironmentVariableW(
         L"EDITMDVIEW_EXPECT_ENGLISH_UI", nullptr, 0) > 0;
+    const bool scrollBottomTest = GetEnvironmentVariableW(
+        L"EDITMDVIEW_EXPECT_SCROLL_BOTTOM", nullptr, 0) > 0;
     const bool shortcutsDialogTest = GetEnvironmentVariableW(
         L"EDITMDVIEW_EXPECT_SHORTCUTS_DIALOG", nullptr, 0) > 0;
     if (persistentStateTest || recoverySnapshotTest || configurationReloadTest) {
@@ -1067,6 +1069,15 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         output.close();
         SetEnvironmentVariableW(L"SciTE_HOME", configurationDirectory.c_str());
         SetEnvironmentVariableW(L"SciTE_USERHOME", configurationDirectory.c_str());
+    }
+    if (scrollBottomTest && GetEnvironmentVariableW(
+        L"EDITMDVIEW_SCROLL_USE_EXISTING", nullptr, 0) == 0) {
+        std::ofstream stream(documentPath, std::ios::binary | std::ios::trunc);
+        if (!stream) return 45;
+        for (int index = 0; index < 1750; ++index) {
+            stream << "Paragraph " << index << ' ' << std::string(480, 'x') << '\n';
+        }
+        stream << "END OF DOCUMENT";
     }
     if (persistentStateTest) {
         std::ofstream stream(documentPath, std::ios::binary | std::ios::trunc);
@@ -1153,6 +1164,124 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand) {
         FreeLibrary(g_plugin);
         if (SUCCEEDED(comResult)) CoUninitialize();
         return 6;
+    }
+    if (scrollBottomTest) {
+        const HWND editor = FindWindowExW(g_pluginWindow, nullptr, L"Scintilla", nullptr);
+        ShowWindow(host, SW_SHOWNORMAL);
+        ShowWindow(g_pluginWindow, SW_SHOW);
+        // Real users spend time in preview before choosing Edit. Let the hidden
+        // editor finish idle wrapping while native scrollbar updates are skipped.
+        pump_messages(300);
+        SendMessageW(g_pluginWindow, WM_COMMAND, 1001, 0); // Preview -> Edit.
+        // First opening must publish the complete range before a native drag
+        // starts; repairing it halfway through tracking is too late.
+        SCROLLINFO initialScroll{sizeof(initialScroll), SIF_ALL};
+        GetScrollInfo(editor, SB_VERT, &initialScroll);
+        const auto lastLine = SendMessageW(editor, SCI_GETLINECOUNT, 0, 0) - 1;
+        SendMessageW(editor, SCI_ENSUREVISIBLE, lastLine, 0);
+        SCROLLINFO completeScroll{sizeof(completeScroll), SIF_ALL};
+        GetScrollInfo(editor, SB_VERT, &completeScroll);
+        const auto displayedLines = SendMessageW(editor, SCI_VISIBLEFROMDOCLINE, lastLine, 0) +
+            SendMessageW(editor, SCI_WRAPCOUNT, lastLine, 0);
+        const auto pageLines = SendMessageW(editor, SCI_LINESONSCREEN, 0, 0);
+        const auto expectedMaximum = SendMessageW(editor, SCI_GETENDATLASTLINE, 0, 0)
+            ? displayedLines - 1 : displayedLines + pageLines - 2;
+        const bool initialRangeReady = initialScroll.nMax == completeScroll.nMax &&
+            initialScroll.nPage == completeScroll.nPage &&
+            initialScroll.nMax == expectedMaximum &&
+            initialScroll.nPage == static_cast<UINT>(pageLines);
+        SendMessageW(editor, SCI_SETWRAPMODE, SC_WRAP_WORD, 0);
+        UpdateWindow(editor);
+        const auto caret = SendMessageW(editor, SCI_GETCURRENTPOS, 0, 0);
+        const auto anchor = SendMessageW(editor, SCI_GETANCHOR, 0, 0);
+        bool atBottom = initialRangeReady;
+        std::ofstream scrollLog(runtimeDataDirectory / L"scroll-bottom-result.txt");
+        scrollLog << "firstOpenRangeReady=" << initialRangeReady
+            << " initialMax=" << initialScroll.nMax << " fullMax=" << completeScroll.nMax
+            << " expectedMax=" << expectedMaximum << " nativePage=" << initialScroll.nPage
+            << " expectedPage=" << pageLines << '\n';
+        for (int scenario = 0; scenario < 4; ++scenario) {
+            SendMessageW(editor, SCI_SETFIRSTVISIBLELINE, 0, 0);
+            if (scenario == 0) MoveWindow(host, 0, 0, 640, 760, TRUE);
+            if (scenario == 1) SendMessageW(g_pluginWindow, WM_COMMAND, 1002, 0); // Split.
+            if (scenario == 2) SendMessageW(editor, SCI_SETZOOM, 3, 0);
+            if (scenario == 3) SendMessageW(editor, SCI_SETWRAPMODE, SC_WRAP_NONE, 0);
+            // Scroll immediately, before idle wrapping has visited the whole document.
+            SCROLLINFO scroll{sizeof(scroll), SIF_ALL};
+            GetScrollInfo(editor, SB_VERT, &scroll);
+            const int bottom = std::max(0, scroll.nMax - static_cast<int>(scroll.nPage) + 1);
+            // Native thumb tracking uses the advertised scrollbar range, unlike
+            // SB_BOTTOM which asks Scintilla to calculate its internal maximum.
+            SetScrollPos(editor, SB_VERT, bottom, FALSE);
+            SendMessageW(editor, WM_VSCROLL, MAKEWPARAM(SB_THUMBPOSITION, bottom), 0);
+            UpdateWindow(editor);
+            RECT client{};
+            GetClientRect(editor, &client);
+            const auto length = SendMessageW(editor, SCI_GETLENGTH, 0, 0);
+            const auto y = SendMessageW(editor, SCI_POINTYFROMPOSITION, 0, length);
+            const bool scenarioPassed = y >= 0 && y < client.bottom &&
+                SendMessageW(editor, SCI_GETCURRENTPOS, 0, 0) == caret &&
+                SendMessageW(editor, SCI_GETANCHOR, 0, 0) == anchor &&
+                !SendMessageW(editor, SCI_GETMODIFY, 0, 0);
+            atBottom = atBottom && scenarioPassed;
+            SCROLLINFO after{sizeof(after), SIF_ALL};
+            GetScrollInfo(editor, SB_VERT, &after);
+            scrollLog << "scenario=" << scenario << " passed=" << scenarioPassed
+                << " oldMax=" << scroll.nMax << " newMax=" << after.nMax
+                << " track=" << scroll.nTrackPos << " top="
+                << SendMessageW(editor, SCI_GETFIRSTVISIBLELINE, 0, 0)
+                << " topDocumentLine=" << SendMessageW(editor, SCI_DOCLINEFROMVISIBLE,
+                    SendMessageW(editor, SCI_GETFIRSTVISIBLELINE, 0, 0), 0)
+                << " lines=" << SendMessageW(editor, SCI_GETLINECOUNT, 0, 0)
+                << " eofY=" << y << " height=" << client.bottom << '\n';
+            if (!scenarioPassed) {
+                char diagnostic[256]{};
+                sprintf_s(diagnostic, "Scroll-bottom: EOF y=%lld, viewport height=%ld, range=%d, page=%u, top=%lld, lines=%lld\n",
+                    static_cast<long long>(y), client.bottom, scroll.nMax, scroll.nPage,
+                    static_cast<long long>(SendMessageW(editor, SCI_GETFIRSTVISIBLELINE, 0, 0)),
+                    static_cast<long long>(SendMessageW(editor, SCI_GETLINECOUNT, 0, 0)));
+                OutputDebugStringA(diagnostic);
+            }
+        }
+        g_closePlugin(g_pluginWindow);
+        g_pluginWindow = nullptr;
+        // Reopen with the state saved by the first instance, then compare the
+        // same range invariant. Both paths must work independently.
+        g_pluginWindow = loadPlugin(host, mutablePath.data(), 0);
+        if (g_pluginWindow) {
+            RECT hostClient{};
+            GetClientRect(host, &hostClient);
+            MoveWindow(g_pluginWindow, 0, 0, hostClient.right, hostClient.bottom, TRUE);
+            pump_messages(100);
+            const HWND reopened = FindWindowExW(g_pluginWindow, nullptr, L"Scintilla", nullptr);
+            SCROLLINFO savedRange{sizeof(savedRange), SIF_ALL};
+            GetScrollInfo(reopened, SB_VERT, &savedRange);
+            SendMessageW(reopened, SCI_ENSUREVISIBLE,
+                SendMessageW(reopened, SCI_GETLINECOUNT, 0, 0) - 1, 0);
+            SCROLLINFO readyRange{sizeof(readyRange), SIF_ALL};
+            GetScrollInfo(reopened, SB_VERT, &readyRange);
+            const bool reopenedRangeReady = savedRange.nMax == readyRange.nMax &&
+                savedRange.nPage == readyRange.nPage;
+            atBottom = atBottom && reopenedRangeReady;
+            SendMessageW(reopened, WM_VSCROLL, SB_BOTTOM, 0);
+            UpdateWindow(reopened);
+            RECT client{};
+            GetClientRect(reopened, &client);
+            const auto y = SendMessageW(reopened, SCI_POINTYFROMPOSITION, 0,
+                SendMessageW(reopened, SCI_GETLENGTH, 0, 0));
+            atBottom = atBottom && y >= 0 && y < client.bottom;
+            scrollLog << "reopenedRangeReady=" << reopenedRangeReady
+                << " initialMax=" << savedRange.nMax << " fullMax=" << readyRange.nMax
+                << " eofY=" << y << " height=" << client.bottom << '\n';
+            g_closePlugin(g_pluginWindow);
+            g_pluginWindow = nullptr;
+        } else {
+            atBottom = false;
+        }
+        DestroyWindow(host);
+        FreeLibrary(g_plugin);
+        if (SUCCEEDED(comResult)) CoUninitialize();
+        return atBottom ? 0 : 45;
     }
     if (englishUiTest) {
         const HWND languageButton = find_control_by_id(g_pluginWindow, 1011);

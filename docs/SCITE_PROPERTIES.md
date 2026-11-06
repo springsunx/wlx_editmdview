@@ -1,6 +1,6 @@
 # SciTE properties compatibility
 
-EditMdView 0.5.11 reads SciTE's editor-related `.properties` settings. Configuration is optional: the plugin uses built-in defaults when no property files are present.
+EditMdView 0.5.12 reads SciTE's editor-related `.properties` settings. Configuration is optional: the plugin uses built-in defaults when no property files are present.
 
 The release ZIP ships `SciTEGlobal.properties`, `SciTEUser.properties`, and curated
 `conf.properties`, `cpp.properties`, `html.properties`, and `lisp.properties` language files.

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.12
+
+- Made long Markdown outlines independently scrollable, with isolated mouse-wheel
+  scrolling, unclipped heading cards, keyboard navigation, and current-section following.
+- Fixed dragging the editor scrollbar to the bottom stopping before the end of long,
+  wrapped documents. Pending wrapping is completed before scrollbar interaction, and
+  thumb positions retain their relative location when the scroll range changes.
+- Completed wrapped layout at the final visible editor size on first opening and
+  preview/edit/split transitions, so native dragging starts with the full range
+  even when no saved document position exists.
+- Refreshed the native scrollbar explicitly when showing a previously hidden editor
+  at unchanged dimensions. Idle wrapping during preview may finish internally while
+  the native scrollbar still retains its initial unwrapped range and page size.
+- Added regression coverage for first opening without saved positions, preview idle
+  wrapping, reopening, and real browser layout and navigation with 240 headings.
+
 ## 0.5.11
 
 - Added a searchable, localized, modeless shortcut window with 100 plugin, Scintilla,

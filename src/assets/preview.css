@@ -1,3 +1,38 @@
+.editmdview-outline {
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-width: none;
+    pointer-events: auto;
+    scroll-behavior: auto;
+}
+
+.editmdview-outline::-webkit-scrollbar { display: none; }
+.editmdview-outline.is-overflowing { justify-content: flex-start; }
+.editmdview-outline.is-overflowing a { flex: 0 0 10px; }
+.editmdview-outline .outline-label { display: none; }
+
+/* A sibling card stays outside the rail's scroll clip. */
+.editmdview-outline-tooltip {
+    position: fixed;
+    z-index: 21;
+    right: 44px;
+    max-width: min(320px, calc(100vw - 58px));
+    padding: 9px 12px;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 9px 28px #0002, 0 2px 7px #0001;
+    font-size: 13px;
+    font-weight: 550;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+
 .editmdview-code-block {
     position: relative;
     margin: 0 0 1em;

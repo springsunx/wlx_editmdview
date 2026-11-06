@@ -834,6 +834,30 @@ LRESULT CALLBACK AppWindow::window_proc(HWND window, UINT message, WPARAM wParam
 LRESULT CALLBACK AppWindow::editor_subclass_proc(HWND window, UINT message, WPARAM wParam, LPARAM lParam,
     UINT_PTR, DWORD_PTR referenceData) {
     auto* self = reinterpret_cast<AppWindow*>(referenceData);
+    if (self && message == WM_NCLBUTTONDOWN && wParam == HTVSCROLL) {
+        self->editor_.prepare_vertical_scroll();
+    }
+    if (self && message == WM_VSCROLL) {
+        SCROLLINFO before{sizeof(before), SIF_ALL};
+        GetScrollInfo(window, SB_VERT, &before);
+        self->editor_.prepare_vertical_scroll();
+        const auto action = LOWORD(wParam);
+        if (action == SB_THUMBTRACK || action == SB_THUMBPOSITION) {
+            SCROLLINFO after{sizeof(after), SIF_ALL};
+            GetScrollInfo(window, SB_VERT, &after);
+            const int oldMaximum = std::max(0, before.nMax - static_cast<int>(before.nPage) + 1);
+            const int newMaximum = std::max(0, after.nMax - static_cast<int>(after.nPage) + 1);
+            if (oldMaximum > 0 && oldMaximum != newMaximum) {
+                // The thumb position belongs to the old, partially wrapped
+                // range. Preserve its fraction, especially the bottom endpoint.
+                const double fraction = std::clamp(
+                    static_cast<double>(before.nTrackPos) / oldMaximum, 0.0, 1.0);
+                SendMessageW(window, SCI_SETFIRSTVISIBLELINE,
+                    static_cast<WPARAM>(std::llround(fraction * newMaximum)), 0);
+                return 0;
+            }
+        }
+    }
     if (message == WM_LBUTTONDOWN && self && self->slashPopup_ && !self->slashTableMode_) {
         self->hide_slash_popup();
     }

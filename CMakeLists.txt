@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(EditMdView VERSION 0.5.11 LANGUAGES C CXX RC)
+project(EditMdView VERSION 0.5.12 LANGUAGES C CXX RC)
 
 if(NOT WIN32)
     message(FATAL_ERROR "EditMdView is a Windows-only Total Commander WLX plugin")
@@ -173,6 +173,16 @@ if(BUILD_TESTING)
     add_test(NAME preview_assets
         COMMAND "${CMAKE_COMMAND}" -DASSET_DIR=${CMAKE_SOURCE_DIR}/src/assets
             -P "${CMAKE_SOURCE_DIR}/tests/check_preview_assets.cmake")
+    find_program(EDITMDVIEW_NODE_EXECUTABLE NAMES node)
+    find_program(EDITMDVIEW_EDGE_EXECUTABLE NAMES msedge
+        PATHS "C:/Program Files (x86)/Microsoft/Edge/Application"
+              "C:/Program Files/Microsoft/Edge/Application")
+    if(EDITMDVIEW_NODE_EXECUTABLE AND EDITMDVIEW_EDGE_EXECUTABLE)
+        add_test(NAME preview_outline_browser
+            COMMAND "${EDITMDVIEW_NODE_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/preview_outline_test.cjs"
+                "${EDITMDVIEW_EDGE_EXECUTABLE}")
+        set_tests_properties(preview_outline_browser PROPERTIES TIMEOUT 45)
+    endif()
     add_test(NAME english_ui_language
         COMMAND "${CMAKE_COMMAND}" -E env
             "EDITMDVIEW_LANGUAGE=en-US"
@@ -184,6 +194,11 @@ if(BUILD_TESTING)
             "EDITMDVIEW_EXPECT_SHORTCUTS_DIALOG=1"
             "$<TARGET_FILE:wlx_harness>" "$<TARGET_FILE:editmdview>"
             "${CMAKE_SOURCE_DIR}/CMakeLists.txt" 1)
+    add_test(NAME long_markdown_scroll_bottom
+        COMMAND "${CMAKE_COMMAND}" -E env
+            "EDITMDVIEW_EXPECT_SCROLL_BOTTOM=1"
+            "$<TARGET_FILE:wlx_harness>" "$<TARGET_FILE:editmdview>"
+            "${CMAKE_BINARY_DIR}/scroll-bottom.md" 1)
     add_test(NAME repeated_open
         COMMAND wlx_harness "$<TARGET_FILE:editmdview>" "${CMAKE_SOURCE_DIR}/CMakeLists.txt" 10)
     add_test(NAME list_load_next_keeps_position

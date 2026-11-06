@@ -100,6 +100,7 @@ public:
     int line_count() const;
     int first_visible_document_line() const;
     int visible_line_count() const;
+    void prepare_vertical_scroll() const;
     EditorViewState view_state() const;
     void restore_view_state(const EditorViewState& state) const;
     SyntaxLanguage language() const noexcept { return language_; }

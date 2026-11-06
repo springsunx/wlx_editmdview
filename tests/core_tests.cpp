@@ -104,6 +104,14 @@ int main() {
         "duplicate heading anchors are unique");
     check(outlineHtml.find(L"href=\"#快速开始\"") != std::wstring::npos,
         "outline links target generated heading anchors");
+    std::string manyHeadings;
+    for (int index = 0; index < 240; ++index) {
+        manyHeadings += "## Heading " + std::to_string(index) + "\n\nParagraph.\n\n";
+    }
+    const auto longOutlineHtml = render_markdown_html(manyHeadings, options);
+    check(longOutlineHtml.find(L"href=\"#heading-239\"") != std::wstring::npos &&
+        longOutlineHtml.find(L"<h2 id=\"heading-239\">Heading 239</h2>") != std::wstring::npos,
+        "long Markdown outline retains the last heading and its matching destination");
 
     const std::wstring htmlPreview = render_html_preview(
         "<!doctype html><html><head><title>Page</title></head><body>\n<h1>Hello</h1></body></html>",

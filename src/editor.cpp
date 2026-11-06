@@ -293,10 +293,29 @@ void Editor::resize(const RECT& bounds) const {
     if (!window_) return;
     MoveWindow(window_, bounds.left, bounds.top, bounds.right - bounds.left,
         bounds.bottom - bounds.top, TRUE);
+    // Native scrollbar tracking captures its range when the drag begins.
+    // Complete wrapping at the final, visible width, before that can happen.
+    // Hidden preview editors can wait until they are shown and laid out.
+    if ((GetWindowLongPtrW(window_, GWL_STYLE) & WS_VISIBLE) != 0 &&
+        bounds.right > bounds.left && bounds.bottom > bounds.top) {
+        prepare_vertical_scroll();
+    }
 }
 
 void Editor::show(bool visible) const {
-    if (window_) ShowWindow(window_, visible ? SW_SHOW : SW_HIDE);
+    if (!window_) return;
+    const bool wasVisible = (GetWindowLongPtrW(window_, GWL_STYLE) & WS_VISIBLE) != 0;
+    ShowWindow(window_, visible ? SW_SHOW : SW_HIDE);
+    if (visible && !wasVisible) {
+        // While hidden, Scintilla skips updating the native scrollbar. Showing
+        // at the same rectangle does not produce WM_SIZE, so its native range
+        // can still describe the original 100x100, unwrapped editor even though
+        // its internal document/display-line mapping is already up to date.
+        RECT client{};
+        GetClientRect(window_, &client);
+        send(WM_SIZE, SIZE_RESTORED, MAKELPARAM(client.right, client.bottom));
+        prepare_vertical_scroll();
+    }
 }
 
 void Editor::focus() const {
@@ -1367,6 +1386,16 @@ int Editor::first_visible_document_line() const {
 
 int Editor::visible_line_count() const {
     return std::max(1, static_cast<int>(send(SCI_LINESONSCREEN)));
+}
+
+void Editor::prepare_vertical_scroll() const {
+    if (!window_ || send(SCI_GETWRAPMODE) == SC_WRAP_NONE) return;
+    // EnsureLineVisible completes pending wrapping without moving the viewport
+    // (unlike EnsureVisibleEnforcePolicy). Pick an already visible line so no
+    // collapsed fold is expanded as a side effect.
+    auto line = send(SCI_GETLINECOUNT) - 1;
+    while (line > 0 && !send(SCI_GETLINEVISIBLE, static_cast<WPARAM>(line))) --line;
+    send(SCI_ENSUREVISIBLE, static_cast<WPARAM>(line));
 }
 
 EditorViewState Editor::view_state() const {

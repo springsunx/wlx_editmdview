@@ -11,8 +11,8 @@ IDR_HIGHLIGHT_POWERSHELL_SCRIPT RCDATA "assets\\highlight-powershell.min.js"
 IDR_HIGHLIGHT_PROPERTIES_SCRIPT RCDATA "assets\\highlight-properties.min.js"
 
 ID_VERSION_INFO VERSIONINFO
- FILEVERSION 0,5,11,0
- PRODUCTVERSION 0,5,11,0
+ FILEVERSION 0,5,12,0
+ PRODUCTVERSION 0,5,12,0
  FILEFLAGSMASK 0x3fL
 #ifdef _DEBUG
  FILEFLAGS VS_FF_DEBUG
@@ -29,11 +29,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "EditMdView contributors"
             VALUE "FileDescription", "Text editor and Markdown/HTML viewer for Total Commander"
-            VALUE "FileVersion", "0.5.11"
+            VALUE "FileVersion", "0.5.12"
             VALUE "InternalName", "EditMdView"
             VALUE "OriginalFilename", "EditMdView.wlx64"
             VALUE "ProductName", "EditMdView"
-            VALUE "ProductVersion", "0.5.11"
+            VALUE "ProductVersion", "0.5.12"
         END
     END
     BLOCK "VarFileInfo"

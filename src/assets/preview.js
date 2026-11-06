@@ -33,7 +33,7 @@
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
             acceptNode(node) {
                 const parent = node.parentElement;
-                if (!parent || parent.closest('script,style,noscript,.editmdview-code-tools,.editmdview-outline')) {
+                if (!parent || parent.closest('script,style,noscript,.editmdview-code-tools,.editmdview-outline,.editmdview-outline-tooltip')) {
                     return NodeFilter.FILTER_REJECT;
                 }
                 return node.data ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
@@ -205,6 +205,66 @@
             try { id = decodeURIComponent(id); } catch (error) { /* Keep the encoded id. */ }
             return { link, heading: id ? document.getElementById(id) : null };
         }).filter(entry => entry.heading);
+        const previousTooltip = document.querySelector('.editmdview-outline-tooltip');
+        if (previousTooltip) previousTooltip.remove();
+        const tooltip = document.createElement('div');
+        tooltip.className = 'editmdview-outline-tooltip';
+        tooltip.setAttribute('aria-hidden', 'true');
+        tooltip.hidden = true;
+        outline.after(tooltip);
+        signal.addEventListener('abort', () => tooltip.remove(), { once: true });
+        let currentLink = null;
+        const showTitle = link => {
+            if (!link) { tooltip.hidden = true; return; }
+            const label = link.querySelector('.outline-label');
+            tooltip.textContent = label ? label.textContent : '';
+            tooltip.hidden = false;
+            const bounds = link.getBoundingClientRect();
+            tooltip.style.top = Math.max(8, Math.min(window.innerHeight - tooltip.offsetHeight - 8,
+                bounds.top + bounds.height / 2 - tooltip.offsetHeight / 2)) + 'px';
+        };
+        const revealLink = link => {
+            const bounds = link.getBoundingClientRect();
+            const rail = outline.getBoundingClientRect();
+            if (bounds.top < rail.top || bounds.bottom > rail.bottom) {
+                // Scroll only the outline: scrollIntoView would also scroll the document.
+                outline.scrollTop += bounds.top - rail.top - (rail.height - bounds.height) / 2;
+            }
+        };
+        const layout = () => {
+            outline.classList.toggle('is-overflowing', entries.length * 10 + 2 > outline.clientHeight);
+            if (currentLink) revealLink(currentLink);
+            showTitle(null);
+        };
+        outline.addEventListener('pointerover', event => {
+            const link = event.target.closest('a');
+            if (link && outline.contains(link)) showTitle(link);
+        }, { signal });
+        outline.addEventListener('pointerleave', () => showTitle(null), { signal });
+        outline.addEventListener('focusin', event => {
+            const link = event.target.closest('a');
+            if (link) { revealLink(link); showTitle(link); }
+        }, { signal });
+        outline.addEventListener('focusout', () => showTitle(null), { signal });
+        outline.addEventListener('scroll', () => showTitle(null), { passive: true, signal });
+        outline.addEventListener('wheel', event => {
+            if (event.ctrlKey || !outline.classList.contains('is-overflowing')) return;
+            event.preventDefault();
+            const unit = event.deltaMode === 1 ? 10 : event.deltaMode === 2 ? outline.clientHeight : 1;
+            outline.scrollTop += event.deltaY * unit;
+        }, { passive: false, signal });
+        outline.addEventListener('keydown', event => {
+            const index = entries.findIndex(entry => entry.link === event.target);
+            if (index < 0 || event.ctrlKey || event.altKey || event.metaKey) return;
+            let next = index;
+            if (event.key === 'Home') next = 0;
+            else if (event.key === 'End') next = entries.length - 1;
+            else if (event.key === 'ArrowUp') next = Math.max(0, index - 1);
+            else if (event.key === 'ArrowDown') next = Math.min(entries.length - 1, index + 1);
+            else return;
+            event.preventDefault();
+            entries[next].link.focus({ preventScroll: true });
+        }, { signal });
         let frame = 0;
         const refresh = () => {
             frame = 0;
@@ -214,16 +274,24 @@
                 if (entry.heading.getBoundingClientRect().top <= threshold) current = entry;
                 else break;
             }
+            if (window.scrollY > 0 && window.scrollY + window.innerHeight >=
+                document.documentElement.scrollHeight - 2) current = entries[entries.length - 1];
             for (const entry of entries) {
                 const active = entry === current;
                 entry.link.classList.toggle('current', active);
                 if (active) entry.link.setAttribute('aria-current', 'location');
                 else entry.link.removeAttribute('aria-current');
             }
+            if (current && current.link !== currentLink) {
+                currentLink = current.link;
+                // Let the user browse the directory without fighting auto-follow.
+                if (!outline.matches(':hover') && !outline.contains(document.activeElement)) revealLink(currentLink);
+            }
         };
         const schedule = () => { if (!frame) frame = requestAnimationFrame(refresh); };
         addEventListener('scroll', schedule, { passive: true, signal });
-        addEventListener('resize', schedule, { passive: true, signal });
+        addEventListener('resize', () => { layout(); schedule(); }, { passive: true, signal });
+        layout();
         refresh();
     }
 
